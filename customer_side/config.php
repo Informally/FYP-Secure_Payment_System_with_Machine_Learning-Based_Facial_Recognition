@@ -753,4 +753,70 @@ function getMerchantName($merchant_id) {
     $conn->close();
     return $result->num_rows > 0 ? $result->fetch_assoc()['name'] : 'Unknown Merchant';
 }
+// Add this function to your config.php file, after the other email functions
+
+// Simple password reset email function
+function sendPasswordResetEmail($email, $name, $token) {
+    // Check if PHPMailer is available
+    if (!class_exists('PHPMailer\PHPMailer\PHPMailer') && !class_exists('PHPMailer')) {
+        error_log("PHPMailer class not found. Please check your vendor/autoload.php path.");
+        return false;
+    }
+    
+    $mail = new PHPMailer(true);
+    try {
+        // Server settings (matching your working config exactly)
+        $mail->isSMTP();
+        $mail->Host = 'smtp.gmail.com';
+        $mail->SMTPAuth = true;
+        $mail->Username = 'authorizedpay88@gmail.com';
+        $mail->Password = 'tbpwxivpydxjqrwq';
+        $mail->SMTPSecure = 'tls';
+        $mail->Port = 587;
+        $mail->SMTPDebug = 0;
+        
+        // Recipients
+        $mail->setFrom('authorizedpay88@gmail.com', 'Facial Pay System');
+        $mail->addAddress($email);
+        $mail->isHTML(true);
+        $mail->Subject = 'Reset Your Password - Facial Pay System';
+        
+        // Reset URL (reuses your existing verification structure)
+        $reset_url = "http://localhost/FYP/customer_side/forgot_password.php?step=reset&token=" . $token;
+        
+        // Simple email template (matching your existing style)
+        $mail->Body = "
+        <html>
+        <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
+            <div style='max-width: 600px; margin: 0 auto; padding: 20px;'>
+                <h2 style='color: #3498db;'>Password Reset Request</h2>
+                <p>Hi " . htmlspecialchars($name) . ",</p>
+                <p>You requested to reset your password for your Facial Pay System account.</p>
+                <p>Click the link below to reset your password:</p>
+                <p><a href='" . $reset_url . "' style='background: #3498db; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block;'>Reset My Password</a></p>
+                <p><strong>Important:</strong> This link will expire soon and can only be used once.</p>
+                <p>If you didn't request this password reset, please ignore this email.</p>
+                <hr>
+                <p><small>Facial Pay System - Automated Message</small></p>
+            </div>
+        </body>
+        </html>
+        ";
+        
+        $result = $mail->send();
+        
+        if ($result) {
+            error_log("Password reset email sent successfully to: " . $email);
+        } else {
+            error_log("Failed to send password reset email to: " . $email);
+        }
+        
+        return $result;
+        
+    } catch (Exception $e) {
+        error_log("Password Reset Mailer Error: {$mail->ErrorInfo}");
+        error_log("Exception: " . $e->getMessage());
+        return false;
+    }
+}
 ?>

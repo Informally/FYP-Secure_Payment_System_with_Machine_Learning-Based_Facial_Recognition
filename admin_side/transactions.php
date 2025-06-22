@@ -943,6 +943,9 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
             <!-- <button class="export-btn" onclick="exportTransactions()">
                 <i class="fas fa-download"></i> Export Data
             </button> -->
+            <button class="export-btn" onclick="exportMerchantReport()" style="margin-left: 10px; background: linear-gradient(135deg, var(--success), #27ae60);">
+                <i class="fas fa-chart-line"></i> Merchant Report
+            </button>
         </div>
 
         <?php if ($message): ?>
@@ -1219,6 +1222,85 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
         </div>
     </div>
 
+    <!-- Export Modal for Merchant Reports -->
+    <div id="exportModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Generate Merchant Report</h3>
+                <button class="modal-close" onclick="closeModal('exportModal')">&times;</button>
+            </div>
+            <form action="export_merchant_report.php" method="POST" target="_blank" id="exportForm">
+                <div class="modal-body">
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label class="form-label">Select Merchant</label>
+                        <select class="form-input" name="export_merchant_id" required>
+                            <option value="">Choose a merchant...</option>
+                            <?php foreach ($merchants as $merchant): ?>
+                                <option value="<?= htmlspecialchars($merchant['merchant_id']) ?>">
+                                    <?= htmlspecialchars($merchant['merchant_name']) ?> (<?= htmlspecialchars($merchant['merchant_id']) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label class="form-label">Report Period</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <input type="date" class="form-input" name="export_date_from" 
+                                   value="<?= date('Y-m-d', strtotime('-30 days')) ?>" required>
+                            <input type="date" class="form-input" name="export_date_to" 
+                                   value="<?= date('Y-m-d') ?>" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label class="form-label">Report Format</label>
+                        <select class="form-input" name="export_format" required>
+                            <option value="pdf">PDF Report</option>
+                            <!-- <option value="excel">Excel Spreadsheet</option>
+                            <option value="csv">CSV Data</option> -->
+                        </select>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label class="form-label">Include Sections</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                            <label style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" name="include_summary" value="1" checked>
+                                <span>Financial Summary</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" name="include_transactions" value="1" checked>
+                                <span>Transaction Details</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" name="include_charts" value="1" checked>
+                                <span>Performance Charts</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" name="include_fees" value="1" checked>
+                                <span>Platform Fees Breakdown</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div style="background: #e3f2fd; border: 1px solid #2196f3; padding: 15px; border-radius: 8px; font-size: 14px;">
+                        <strong><i class="fas fa-info-circle"></i> Report Contents:</strong><br>
+                        • Total Revenue & Transaction Count<br>
+                        • Platform Fees (2.9% breakdown)<br>
+                        • Success/Failure Rate Analysis<br>
+                        • Daily Performance Trends<br>
+                        • Detailed Transaction Log
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-cancel" onclick="closeModal('exportModal')">Cancel</button>
+                    <button type="submit" class="btn-save" style="background: var(--success);">Generate Report</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         // Chart.js configuration for revenue chart
         const ctx = document.getElementById('revenueChart').getContext('2d');
@@ -1354,6 +1436,10 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
             const params = new URLSearchParams(window.location.search);
             params.set('export', '1');
             window.open('?' + params.toString(), '_blank');
+        }
+
+        function exportMerchantReport() {
+            document.getElementById('exportModal').classList.add('show');
         }
 
         // Close modals when clicking outside
