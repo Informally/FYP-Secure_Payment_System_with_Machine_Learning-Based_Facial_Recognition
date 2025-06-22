@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, session
+from flask import Flask, request, jsonify, session, render_template
 import numpy as np
 import cv2
 import base64
@@ -2268,6 +2268,12 @@ def verify_multi_challenge():
             "status": "failed",
             "message": f"Failed to create multi-challenge: {str(e)}"
         })
+
+@app.route('/facial-auth')
+def facial_auth():
+    amount = request.args.get('amount')
+    return render_template('facial_checkout.html', amount=amount)
+
 
 # Submit frames for multi-challenge and get next challenge
 @app.route('/submit_multi_challenge_frames', methods=['POST'])

@@ -1,0 +1,155 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Facial Payment Checkout</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f2f2f2;
+            text-align: center;
+            padding: 20px;
+        }
+        video, canvas {
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        input[type="password"] {
+            margin-top: 20px;
+            padding: 12px;
+            font-size: 18px;
+            width: 220px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+        }
+        button {
+            margin-top: 20px;
+            padding: 14px 28px;
+            font-size: 18px;
+            background-color: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #219150;
+        }
+        #status {
+            margin-top: 20px;
+            font-size: 16px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Facial Payment Checkout</h1>
+    <h2>Amount: RM {{ amount }}</h2>
+
+    <video id="video" width="360" height="270" autoplay></video>
+    <br>
+    <input type="password" id="pin" placeholder="Enter 6-digit PIN" maxlength="6">
+    <br>
+    <button onclick="startPayment()">Pay Now</button>
+
+    <p id="status"></p>
+
+    <script>
+        const video = document.getElementById('video');
+        const statusText = document.getElementById('status');
+
+        // Start webcam
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => { video.srcObject = stream; })
+            .catch(err => { statusText.innerText = "Camera access denied."; });
+
+        function captureImage() {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            return canvas.toDataURL('image/jpeg');
+        }
+
+        async function startPayment() {
+            statusText.innerText = "Verifying face...";
+
+            const image_base64 = captureImage();
+            const payload = {
+                action: "verify_face",
+                image_base64: image_base64
+            };
+
+            const faceResponse = await fetch("http://localhost/FYP/payment_api/payment_processing_api.php?action=verify_face", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            const faceResult = await faceResponse.json();
+
+            if (faceResult.status !== "success") {
+                statusText.innerText = "Face verification failed: " + faceResult.message;
+                return;
+            }
+
+            const userId = faceResult.user_id;
+            const pin = document.getElementById("pin").value;
+
+            if (pin.length !== 6) {
+                statusText.innerText = "PIN must be 6 digits.";
+                return;
+            }
+
+            statusText.innerText = "Verifying PIN...";
+
+            const pinPayload = {
+                action: "verify_pin",
+                user_id: userId,
+                pin: pin
+            };
+
+            const pinResponse = await fetch("http://localhost/FYP/payment_api/payment_processing_api.php?action=verify_pin", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(pinPayload)
+            });
+
+            const pinResult = await pinResponse.json();
+
+            if (pinResult.status !== "success") {
+                statusText.innerText = "PIN verification failed: " + pinResult.message;
+                return;
+            }
+
+            statusText.innerText = "Processing payment...";
+
+            const amount = "{{ amount }}";
+
+            const paymentPayload = {
+                action: "process_payment",
+                user_id: userId,
+                amount: parseFloat(amount),
+                payment_method: "facial"
+            };
+
+            const payResponse = await fetch("http://localhost/FYP/payment_api/payment_processing_api.php?action=process_payment", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(paymentPayload)
+            });
+
+            const payResult = await payResponse.json();
+
+            if (payResult.status === "success") {
+                statusText.innerText = "✅ Payment successful! Transaction ID: " + payResult.transaction_id;
+            } else {
+                statusText.innerText = "❌ Payment failed: " + payResult.message;
+            }
+        }
+    </script>
+</body>
+</html>
