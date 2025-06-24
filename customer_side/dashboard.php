@@ -1132,7 +1132,7 @@ $csrf_token = generateCSRFToken();
             <div class="limit-card">
                 <div class="limit-header">
                     <div class="card-icon icon-success">
-                        <i class="fas fa-shield-check"></i>
+                        <i class="fa fa-shield-alt"></i>
                     </div>
                     <div class="limit-title">Account Security</div>
                 </div>

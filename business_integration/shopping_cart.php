@@ -1,10 +1,9 @@
 <?php
 // business_integration/shopping_cart.php
-// DEMO VERSION - Shows API integration prominently
+// DEMO VERSION - Kiosk Payment Interface
 
-// ✅ DEMO: Show the API key configuration prominently
 const MERCHANT_ID = 'MCD';
-const FACEPAY_API_KEY = 'sk_1f55be80af366a8c3e87f53b14962a4f2ec4bbe14755af39'; // Your actual API key
+const FACEPAY_API_KEY = 'sk_1f55be80af366a8c3e87f53b14962a4f2ec4bbe14755af39';
 const FACEPAY_GATEWAY_URL = 'http://localhost/FYP/gateway/checkout.php';
 const SUCCESS_URL = 'http://localhost/FYP/business_integration/payment_success.php';
 const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php';
@@ -15,15 +14,14 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Checkout - Prototype Kiosk</title>
+    <title>Checkout - McDonald's Kiosk</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        /* Your existing styles plus demo highlights */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
             font-family: 'Arial', sans-serif;
-            background: #f8f8f8;
+            background: #f5f5f5;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
@@ -31,177 +29,228 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
 
         .kiosk-header {
             background: linear-gradient(45deg, #da291c, #ffc72c);
-            padding: 15px 0;
+            padding: 20px 0;
             text-align: center;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
         }
 
         .kiosk-header h1 {
             color: white;
-            font-size: 2.5rem;
+            font-size: 2.8rem;
             font-weight: bold;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
         }
 
-        /* ✅ DEMO: API Integration Showcase Panel */
-        .api-showcase {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            padding: 20px;
-            margin: 20px auto;
-            max-width: 1200px;
-            border-radius: 15px;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
-            animation: pulse-glow 3s infinite;
-        }
-
-        @keyframes pulse-glow {
-            0%, 100% { box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3); }
-            50% { box-shadow: 0 8px 35px rgba(102, 126, 234, 0.6); }
-        }
-
-        .api-showcase h3 {
-            font-size: 24px;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .api-details {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-top: 15px;
-        }
-
-        .api-detail {
-            background: rgba(255,255,255,0.1);
-            padding: 15px;
-            border-radius: 10px;
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-
-        .api-detail strong {
-            color: #ffc72c;
-        }
-
-        .api-key-display {
-            font-family: 'Courier New', monospace;
-            background: rgba(0,0,0,0.3);
-            padding: 10px;
-            border-radius: 5px;
-            word-break: break-all;
-            margin-top: 5px;
-            border: 1px solid #ffc72c;
-        }
-
         .checkout-container {
-            max-width: 1200px;
-            margin: 20px auto;
-            padding: 0 20px;
+            max-width: 1400px;
+            margin: 30px auto;
+            padding: 0 30px;
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 30px;
+            gap: 40px;
             flex: 1;
         }
 
         .section-card {
             background: white;
-            border-radius: 15px;
+            border-radius: 20px;
             overflow: hidden;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
             border: 3px solid #ffc72c;
+            height: fit-content;
         }
 
         .section-header {
             background: linear-gradient(45deg, #da291c, #ffc72c);
             color: white;
-            padding: 20px;
-            font-size: 24px;
+            padding: 25px;
+            font-size: 26px;
             font-weight: bold;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 15px;
         }
 
         .section-content {
-            padding: 25px;
+            padding: 30px;
         }
 
-        /* Payment Gateway Demo Section */
-        .gateway-demo {
-            background: linear-gradient(135deg, #e8f5e9, #f1f8e9);
-            border: 3px solid #4caf50;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
-        .gateway-demo h4 {
-            color: #2e7d32;
-            margin-bottom: 15px;
-            font-size: 18px;
+        /* Order Summary Styles */
+        .order-item {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 20px;
+            padding: 20px 0;
+            border-bottom: 2px solid #f0f0f0;
         }
 
-        .demo-step {
-            background: white;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 10px;
-            border-left: 4px solid #4caf50;
+        .item-image {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, #ffc72c, #ffeb3b);
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: #da291c;
+        }
+
+        .item-details {
+            flex: 1;
+        }
+
+        .item-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 18px;
+        }
+
+        .item-price {
+            color: #da291c;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .item-quantity {
+            background: #da291c;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
             font-size: 14px;
+            font-weight: bold;
+        }
+
+        .total-section {
+            background: linear-gradient(135deg, #34495e, #2c3e50);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            margin-top: 25px;
+        }
+
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            font-size: 18px;
+        }
+
+        .total-row.final {
+            font-size: 28px;
+            font-weight: bold;
+            border-top: 3px solid rgba(255,255,255,0.3);
+            padding-top: 20px;
+            margin-top: 20px;
+        }
+
+        /* Payment Options Grid */
+        .payment-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
         }
 
         .payment-option {
-            border: 3px solid #ecf0f1;
+            border: 3px solid #e0e0e0;
             border-radius: 15px;
-            padding: 25px;
+            padding: 20px 15px;
             text-align: center;
             cursor: pointer;
             transition: all 0.3s ease;
-            background: linear-gradient(135deg, #27ae60, #2ecc71);
-            color: white;
-            margin-bottom: 20px;
+            background: white;
+            position: relative;
+            min-height: 140px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
 
-        .payment-option:hover {
+        .payment-option.active {
+            border-color: #27ae60;
+            background: linear-gradient(135deg, #27ae60, #2ecc71);
+            color: white;
             transform: translateY(-5px);
             box-shadow: 0 15px 35px rgba(39, 174, 96, 0.3);
         }
 
+        .payment-option.disabled {
+            background: #f8f9fa;
+            border-color: #dee2e6;
+            color: #6c757d;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        .payment-option.disabled::after {
+            content: 'Not Available';
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #dc3545;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
         .payment-icon {
-            font-size: 48px;
-            margin-bottom: 15px;
+            font-size: 36px;
+            margin-bottom: 12px;
             display: block;
         }
 
         .payment-title {
-            font-size: 18px;
+            font-size: 16px;
             font-weight: bold;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
 
         .payment-description {
-            font-size: 14px;
-            color: rgba(255,255,255,0.9);
-            line-height: 1.4;
+            font-size: 12px;
+            line-height: 1.3;
+            opacity: 0.9;
         }
 
+        /* Credit Card specific styling */
+        .payment-option.credit-card .payment-icon {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .payment-option.touch-go .payment-icon {
+            color: #00b4d8;
+        }
+
+        .payment-option.grabpay .payment-icon {
+            color: #00b14f;
+        }
+
+        .payment-option.boost .payment-icon {
+            color: #ff6b35;
+        }
+
+        .payment-option.facepay .payment-icon {
+            color: #27ae60;
+        }
+
+        /* Action Buttons */
         .action-buttons {
             display: flex;
             gap: 15px;
-            margin-top: 20px;
+            margin-top: 25px;
         }
 
         .btn {
             flex: 1;
             padding: 15px 20px;
             border: none;
-            border-radius: 25px;
+            border-radius: 12px;
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
@@ -213,13 +262,20 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
         }
 
         .btn-primary {
-            background: linear-gradient(45deg, #667eea, #764ba2);
+            background: linear-gradient(45deg, #27ae60, #2ecc71);
             color: white;
         }
 
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(39, 174, 96, 0.4);
+        }
+
+        .btn-primary:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }
 
         .btn-secondary {
@@ -227,134 +283,95 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
             color: white;
         }
 
-        /* Demo Console */
-        .demo-console {
-            background: #1e1e1e;
-            color: #00ff00;
-            padding: 20px;
-            border-radius: 10px;
-            font-family: 'Courier New', monospace;
-            margin-top: 20px;
-            border: 2px solid #333;
-            max-height: 200px;
-            overflow-y: auto;
+        .btn-secondary:hover {
+            background: #7f8c8d;
+            transform: translateY(-2px);
         }
 
-        .console-line {
-            margin-bottom: 5px;
+        /* Selected Payment Method Display */
+        .selected-method {
+            background: linear-gradient(135deg, #e8f5e9, #f1f8e9);
+            border: 3px solid #27ae60;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: none;
         }
 
-        .console-prompt {
-            color: #ffc72c;
+        .selected-method.show {
+            display: block;
+            animation: slideDown 0.3s ease-out;
         }
 
-        /* Order Summary Styles */
-        .order-item {
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .selected-method h4 {
+            color: #27ae60;
+            margin-bottom: 8px;
             display: flex;
             align-items: center;
-            gap: 15px;
-            padding: 15px 0;
-            border-bottom: 1px solid #eee;
-        }
-
-        .item-image {
-            width: 60px;
-            height: 60px;
-            background: linear-gradient(135deg, #ffc72c, #ffeb3b);
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            color: #da291c;
-        }
-
-        .item-details {
-            flex: 1;
-        }
-
-        .item-name {
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 5px;
+            gap: 8px;
             font-size: 16px;
         }
 
-        .item-price {
-            color: #da291c;
-            font-weight: bold;
-            font-size: 16px;
+        .selected-method p {
+            color: #2d5a3d;
+            margin: 0;
+            font-size: 14px;
         }
 
-        .item-quantity {
-            background: #da291c;
-            color: white;
-            padding: 5px 12px;
-            border-radius: 15px;
-            font-size: 12px;
-            font-weight: bold;
+        /* Responsive Design */
+        @media (max-width: 1024px) {
+            .checkout-container {
+                grid-template-columns: 1fr;
+                gap: 30px;
+                max-width: 800px;
+            }
+            
+            .payment-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
 
-        .total-section {
-            background: linear-gradient(135deg, #34495e, #2c3e50);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-top: 20px;
-        }
-
-        .total-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-            font-size: 16px;
-        }
-
-        .total-row.final {
-            font-size: 24px;
-            font-weight: bold;
-            border-top: 2px solid rgba(255,255,255,0.3);
-            padding-top: 15px;
-            margin-top: 15px;
+        @media (max-width: 768px) {
+            .kiosk-header h1 {
+                font-size: 2.2rem;
+            }
+            
+            .section-content {
+                padding: 20px;
+            }
+            
+            .payment-option {
+                padding: 18px 12px;
+                min-height: 120px;
+            }
+            
+            .payment-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .btn {
+                font-size: 14px;
+                padding: 12px 16px;
+            }
         }
     </style>
 </head>
 <body>
     <div class="kiosk-header">
-        <h1><i class="fas fa-credit-card"></i> Prototype Kiosk</h1>
+        <h1><i class="fas fa-store"></i> McDonald's Kiosk</h1>
     </div>
-
-    <!-- ✅ DEMO: API Integration Showcase
-    <div class="api-showcase">
-        <h3><i class="fas fa-code"></i> FacePay Payment Gateway Integration</h3>
-        <p><strong>🚀 This kiosk integrates with FacePay as an external merchant (like McDonald's using PayPal)</strong></p>
-        
-        <div class="api-details">
-            <div class="api-detail">
-                <strong>Merchant ID:</strong> <?= MERCHANT_ID ?>
-                <div>Registered in FacePay merchant system</div>
-            </div>
-            <div class="api-detail">
-                <strong>API Key:</strong>
-                <div class="api-key-display"><?= FACEPAY_API_KEY ?></div>
-            </div>
-            <div class="api-detail">
-                <strong>Gateway URL:</strong> <?= FACEPAY_GATEWAY_URL ?>
-                <div>Payment processing endpoint</div>
-            </div>
-            <div class="api-detail">
-                <strong>Integration Type:</strong> Gateway Redirect
-                <div>Like PayPal/Stripe checkout flow</div>
-            </div>
-        </div>
-    </div> -->
 
     <div class="checkout-container">
         <!-- Order Summary -->
         <div class="section-card">
             <div class="section-header">
                 <i class="fas fa-receipt"></i>
-                Your Order Summary
+                Your Order
             </div>
             <div class="section-content">
                 <div id="orderItems"></div>
@@ -375,20 +392,61 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
             </div>
         </div>
 
-        <!-- Payment Gateway Demo -->
+        <!-- Payment Options -->
         <div class="section-card">
             <div class="section-header">
                 <i class="fas fa-credit-card"></i>
-                Payment Options
+                Choose Payment Method
             </div>
+            <div class="section-content">
+                <!-- Selected Payment Method Display -->
+                <div class="selected-method" id="selectedMethod">
+                    <h4><i class="fas fa-check-circle"></i> Selected Payment Method</h4>
+                    <p id="selectedMethodText">None selected</p>
+                </div>
 
-                <div class="payment-option">
-                    <i class="payment-icon fas fa-user-check"></i>
-                    <div class="payment-title">FacePay Gateway</div>
-                    <div class="payment-description">
-                        External payment processing via API integration<br>
-                        <strong>Merchant:</strong> <?= MERCHANT_ID ?><br>
-                        <strong>API:</strong> ...<?= substr(FACEPAY_API_KEY, -8) ?>
+                <!-- Payment Options Grid -->
+                <div class="payment-grid">
+                    <!-- Credit/Debit Card -->
+                    <div class="payment-option disabled credit-card" onclick="showNotAvailable('Credit/Debit Card')">
+                        <i class="payment-icon fas fa-credit-card"></i>
+                        <div class="payment-title">Credit/Debit Card</div>
+                        <div class="payment-description">Visa, Mastercard, Amex</div>
+                    </div>
+
+                    <!-- Touch 'n Go -->
+                    <div class="payment-option disabled touch-go" onclick="showNotAvailable('Touch n Go')">
+                        <i class="payment-icon fas fa-mobile-alt"></i>
+                        <div class="payment-title">Touch 'n Go</div>
+                        <div class="payment-description">eWallet & Physical Card</div>
+                    </div>
+
+                    <!-- GrabPay -->
+                    <div class="payment-option disabled grabpay" onclick="showNotAvailable('GrabPay')">
+                        <i class="payment-icon fas fa-car"></i>
+                        <div class="payment-title">GrabPay</div>
+                        <div class="payment-description">Digital wallet by Grab</div>
+                    </div>
+
+                    <!-- Boost -->
+                    <div class="payment-option disabled boost" onclick="showNotAvailable('Boost')">
+                        <i class="payment-icon fas fa-rocket"></i>
+                        <div class="payment-title">Boost</div>
+                        <div class="payment-description">Mobile payment app</div>
+                    </div>
+
+                    <!-- FacePay Gateway - ONLY WORKING OPTION -->
+                    <div class="payment-option facepay" id="facepayOption" onclick="selectFacePay()">
+                        <i class="payment-icon fas fa-user-check"></i>
+                        <div class="payment-title">FacePay</div>
+                        <div class="payment-description">Secure facial recognition payment</div>
+                    </div>
+
+                    <!-- Cash (Disabled for kiosk demo) -->
+                    <div class="payment-option disabled" onclick="showNotAvailable('Cash')">
+                        <i class="payment-icon fas fa-money-bill-wave"></i>
+                        <div class="payment-title">Cash</div>
+                        <div class="payment-description">Pay with cash at counter</div>
                     </div>
                 </div>
 
@@ -408,18 +466,9 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
                     <button class="btn btn-secondary" onclick="goBack()">
                         <i class="fas fa-arrow-left"></i> Back to Menu
                     </button>
-                    <button class="btn btn-primary" onclick="payWithGateway()">
-                        <i class="fas fa-rocket"></i> Initiate Gateway Payment
+                    <button class="btn btn-primary" id="proceedBtn" disabled onclick="proceedWithPayment()">
+                        <i class="fas fa-lock"></i> Proceed to Payment
                     </button>
-                </div>
-
-                <!-- ✅ DEMO: Live API Console -->
-                <div class="demo-console" id="apiConsole">
-                    <div class="console-line"><span class="console-prompt">$</span> Initializing FacePay Gateway Integration...</div>
-                    <div class="console-line">✅ Merchant ID: <?= MERCHANT_ID ?></div>
-                    <div class="console-line">✅ API Key: <?= substr(FACEPAY_API_KEY, 0, 20) ?>...</div>
-                    <div class="console-line">✅ Gateway endpoint ready</div>
-                    <div class="console-line"><span class="console-prompt">$</span> Waiting for payment initiation...</div>
                 </div>
             </div>
         </div>
@@ -427,11 +476,11 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
 
     <script>
         let cart = [];
+        let selectedPaymentMethod = null;
 
         document.addEventListener('DOMContentLoaded', function() {
             loadCartFromStorage();
             renderOrderSummary();
-            startDemoAnimation();
         });
 
         function loadCartFromStorage() {
@@ -475,45 +524,53 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
             finalTotalEl.textContent = finalTotal.toFixed(2);
         }
 
-        // ✅ DEMO: Gateway payment with console logging
+        function selectFacePay() {
+            // Remove active class from all options
+            document.querySelectorAll('.payment-option').forEach(option => {
+                option.classList.remove('active');
+            });
+
+            // Add active class to FacePay
+            document.getElementById('facepayOption').classList.add('active');
+            
+            selectedPaymentMethod = 'facepay';
+            
+            // Show selected method
+            const selectedMethodDiv = document.getElementById('selectedMethod');
+            const selectedMethodText = document.getElementById('selectedMethodText');
+            
+            selectedMethodText.textContent = 'FacePay - Secure facial recognition payment';
+            selectedMethodDiv.classList.add('show');
+            
+            // Enable proceed button
+            document.getElementById('proceedBtn').disabled = false;
+        }
+
+        function showNotAvailable(methodName) {
+            alert(`${methodName} is currently not available. Please use FacePay for payment.`);
+        }
+
+        function proceedWithPayment() {
+            if (selectedPaymentMethod === 'facepay') {
+                payWithGateway();
+            } else {
+                alert('Please select FacePay to proceed with payment.');
+            }
+        }
+
         function payWithGateway() {
             const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
             const tax = subtotal * 0.06;
             const total = subtotal + tax;
             const orderId = 'KIOSK-DEMO-' + Date.now();
             
-            // ✅ DEMO: Show API call in console
-            addConsoleLog('🚀 Initiating gateway payment...');
-            addConsoleLog(`💰 Amount: RM ${total.toFixed(2)}`);
-            addConsoleLog(`📋 Order ID: ${orderId}`);
-            addConsoleLog(`🔑 Using API Key: ${<?= json_encode(FACEPAY_API_KEY) ?>}`);
-            addConsoleLog('🌐 Redirecting to FacePay Gateway...');
-            
             // Fill form data
             document.getElementById('gateway_amount').value = total.toFixed(2);
             document.getElementById('gateway_order_id').value = orderId;
-            document.getElementById('gateway_description').value = `Demo Kiosk Order - ${cart.length} items`;
+            document.getElementById('gateway_description').value = `McDonald's Kiosk Order - ${cart.length} items`;
             
-            // ✅ DEMO: Short delay to show the console, then redirect
-            setTimeout(() => {
-                document.getElementById('facepayGatewayForm').submit();
-            }, 2000);
-        }
-
-        function addConsoleLog(message) {
-            const console = document.getElementById('apiConsole');
-            const line = document.createElement('div');
-            line.className = 'console-line';
-            line.innerHTML = `<span class="console-prompt">$</span> ${message}`;
-            console.appendChild(line);
-            console.scrollTop = console.scrollHeight;
-        }
-
-        function startDemoAnimation() {
-            // ✅ DEMO: Add some live API status updates
-            setTimeout(() => addConsoleLog('✅ Gateway connection established'), 2000);
-            setTimeout(() => addConsoleLog('✅ Merchant authentication successful'), 4000);
-            setTimeout(() => addConsoleLog('🎯 Ready for payment processing'), 6000);
+            // Submit to FacePay Gateway
+            document.getElementById('facepayGatewayForm').submit();
         }
 
         function goBack() {

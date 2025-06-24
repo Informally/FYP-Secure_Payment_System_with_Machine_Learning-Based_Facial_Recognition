@@ -185,7 +185,8 @@ if ($_SERVER["REQUEST_METHOD"] == "GET") {
             'merchant_name' => $merchant['name'],
             'order_id' => $payment_data['order_id'],
             'user_balance' => $new_balance,
-            'completed_at' => date('Y-m-d H:i:s')
+            'completed_at' => date('Y-m-d H:i:s'),
+            'return_url' => $payment_data['return_url'] ?? ''
         ];
         
         $success = "Payment completed successfully!";
@@ -222,7 +223,8 @@ if ($_SERVER["REQUEST_METHOD"] == "GET") {
             'amount' => $payment_data['amount'],
             'currency' => $payment_data['currency'],
             'merchant_name' => $payment_data['merchant_name'] ?? 'Unknown',
-            'order_id' => $payment_data['order_id']
+            'order_id' => $payment_data['order_id'],
+            'cancel_url' => $payment_data['cancel_url'] ?? ''
         ];
     }
 }
@@ -238,21 +240,6 @@ $csrf_token = generateCSRFToken();
     <title><?= $payment_result['status'] === 'success' ? 'Payment Successful' : 'Payment Failed' ?> - FacePay</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        :root {
-            --primary: #667eea;
-            --primary-light: #e3f2fd;
-            --primary-dark: #5a67d8;
-            --success: #38a169;
-            --warning: #ed8936;
-            --error: #e53e3e;
-            --text-dark: #2d3748;
-            --text-medium: #4a5568;
-            --text-light: #718096;
-            --border: #e2e8f0;
-            --bg-light: #f7fafc;
-            --shadow: rgba(0,0,0,0.1);
-        }
-        
         * {
             margin: 0;
             padding: 0;
@@ -263,8 +250,7 @@ $csrf_token = generateCSRFToken();
             font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
             background: linear-gradient(135deg, 
                 <?= $payment_result['status'] === 'success' ? '#38a169 0%, #48bb78 100%' : '#e53e3e 0%, #f56565 100%' ?>);
-            color: var(--text-dark);
-            line-height: 1.6;
+            color: #2d3748;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -272,55 +258,48 @@ $csrf_token = generateCSRFToken();
             padding: 20px;
         }
         
-        .container {
-            width: 100%;
-            max-width: 700px;
-        }
-        
-        .result-container {
+        .success-container {
             background: white;
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+            border-radius: 24px;
+            padding: 60px 40px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.2);
             text-align: center;
-            animation: fadeUp 0.8s ease-out;
+            max-width: 600px;
+            width: 100%;
+            animation: slideUp 0.8s ease-out;
             position: relative;
             overflow: hidden;
         }
         
-        .result-container::before {
+        .success-container::before {
             content: '';
             position: absolute;
             top: 0;
             left: 0;
             right: 0;
-            height: 4px;
-            background: <?= $payment_result['status'] === 'success' ? 'var(--success)' : 'var(--error)' ?>;
+            height: 6px;
+            background: <?= $payment_result['status'] === 'success' ? '#38a169' : '#e53e3e' ?>;
         }
         
-        @keyframes fadeUp {
-            from { opacity: 0; transform: translateY(30px); }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(50px); }
             to { opacity: 1; transform: translateY(0); }
         }
         
-        .result-header {
-            margin-bottom: 35px;
-        }
-        
-        .result-icon {
-            width: 100px;
-            height: 100px;
-            background: <?= $payment_result['status'] === 'success' ? 'var(--success)' : 'var(--error)' ?>;
+        .success-icon {
+            width: 120px;
+            height: 120px;
+            background: <?= $payment_result['status'] === 'success' ? '#38a169' : '#e53e3e' ?>;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin: 0 auto 25px;
-            animation: <?= $payment_result['status'] === 'success' ? 'successPulse' : 'errorShake' ?> 1s ease-out;
+            margin: 0 auto 30px;
+            animation: <?= $payment_result['status'] === 'success' ? 'successPulse' : 'errorShake' ?> 1.2s ease-out;
         }
         
         @keyframes successPulse {
-            0% { transform: scale(0.8); opacity: 0; }
+            0% { transform: scale(0.5); opacity: 0; }
             50% { transform: scale(1.1); }
             100% { transform: scale(1); opacity: 1; }
         }
@@ -331,103 +310,108 @@ $csrf_token = generateCSRFToken();
             75% { transform: translateX(5px); }
         }
         
-        .result-icon i {
-            font-size: 48px;
+        .success-icon i {
+            font-size: 60px;
             color: white;
         }
         
-        h2 {
-            color: <?= $payment_result['status'] === 'success' ? 'var(--success)' : 'var(--error)' ?>;
-            font-size: 32px;
+        h1 {
+            color: <?= $payment_result['status'] === 'success' ? '#38a169' : '#e53e3e' ?>;
+            font-size: 42px;
             font-weight: 700;
-            margin-bottom: 10px;
+            margin-bottom: 15px;
         }
         
         .subtitle {
-            color: var(--text-light);
-            font-size: 18px;
-            margin-bottom: 35px;
+            color: #718096;
+            font-size: 20px;
+            margin-bottom: 40px;
+            line-height: 1.4;
         }
         
-        /* Transaction Details */
-        .transaction-details {
-            background: var(--bg-light);
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 30px;
+        .payment-summary {
+            background: <?= $payment_result['status'] === 'success' ? '#f0fff4' : '#fff5f5' ?>;
             border: 2px solid <?= $payment_result['status'] === 'success' ? '#c6f6d5' : '#fed7d7' ?>;
-            text-align: left;
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 40px;
         }
         
-        .transaction-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
+        .amount-paid {
+            font-size: 48px;
+            color: <?= $payment_result['status'] === 'success' ? '#38a169' : '#e53e3e' ?>;
+            font-weight: 800;
+            margin-bottom: 10px;
         }
         
-        .detail-item {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .detail-label {
-            font-size: 12px;
-            color: var(--text-light);
-            text-transform: uppercase;
+        .merchant-name {
+            font-size: 24px;
+            color: #2d3748;
             font-weight: 600;
             margin-bottom: 8px;
-            letter-spacing: 0.5px;
         }
         
-        .detail-value {
+        .order-info {
+            color: #718096;
             font-size: 16px;
-            color: var(--text-dark);
-            font-weight: 600;
-            word-break: break-all;
         }
         
-        .amount-value {
-            font-size: 28px;
-            color: <?= $payment_result['status'] === 'success' ? 'var(--success)' : 'var(--error)' ?>;
+        <?php if ($payment_result['status'] === 'success'): ?>
+        .redirect-info {
+            background: #e6fffa;
+            border: 2px solid #81e6d9;
+            border-radius: 16px;
+            padding: 25px;
+            margin-bottom: 30px;
+        }
+        
+        .redirect-text {
+            color: #2d3748;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+        
+        .countdown {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            color: #38a169;
+            font-size: 20px;
             font-weight: 700;
         }
         
-        .status-badge {
-            display: inline-flex;
+        .countdown-number {
+            background: #38a169;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 800;
+            animation: countdownPulse 1s infinite;
         }
         
-        .status-success {
-            background: #f0fff4;
-            color: var(--success);
-            border: 1px solid #c6f6d5;
+        @keyframes countdownPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
         }
-        
-        .status-failed {
-            background: #fff5f5;
-            color: var(--error);
-            border: 1px solid #fed7d7;
-        }
-        
-        /* Error Message */
+        <?php else: ?>
         .error-details {
             background: #fff5f5;
             border: 2px solid #fed7d7;
-            border-radius: 15px;
-            padding: 20px;
+            border-radius: 16px;
+            padding: 25px;
             margin-bottom: 30px;
             text-align: left;
         }
         
         .error-details h4 {
-            color: var(--error);
+            color: #e53e3e;
             margin-bottom: 10px;
             display: flex;
             align-items: center;
@@ -435,404 +419,202 @@ $csrf_token = generateCSRFToken();
         }
         
         .error-details p {
-            color: var(--text-medium);
+            color: #4a5568;
             line-height: 1.6;
         }
+        <?php endif; ?>
         
-        /* Balance Update (Success only) */
-        .balance-update {
-            background: linear-gradient(135deg, #f0fff4 0%, #e6fffa 100%);
-            border: 2px solid #c6f6d5;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .balance-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 15px;
-        }
-        
-        .balance-item {
-            text-align: center;
-        }
-        
-        .balance-label {
-            font-size: 12px;
-            color: var(--text-light);
-            text-transform: uppercase;
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        
-        .balance-amount {
-            font-size: 20px;
-            color: var(--success);
-            font-weight: 700;
-        }
-        
-        /* Security Summary */
-        .security-summary {
-            background: #f0f8ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 30px;
-            text-align: left;
-        }
-        
-        .security-summary h4 {
-            color: var(--primary);
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .security-items {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-        }
-        
-        .security-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px;
-            background: white;
-            border-radius: 8px;
-            border: 1px solid #e2e8f0;
-        }
-        
-        .security-item i {
-            color: var(--success);
-            font-size: 16px;
-        }
-        
-        .security-text {
-            font-size: 14px;
-            color: var(--text-medium);
-        }
-        
-        /* Action Buttons */
-        .actions {
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-            flex-wrap: wrap;
+        .manual-return {
             margin-top: 30px;
         }
         
-        .btn {
-            padding: 15px 25px;
+        .return-btn {
+            background: <?= $payment_result['status'] === 'success' ? '#38a169' : '#e53e3e' ?>;
+            color: white;
             border: none;
+            padding: 18px 40px;
             border-radius: 12px;
-            font-size: 16px;
+            font-size: 18px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
             display: inline-flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
             text-decoration: none;
-            min-width: 160px;
-            justify-content: center;
         }
         
-        .btn-primary {
-            background: var(--primary);
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background: var(--primary-dark);
+        .return-btn:hover {
+            background: <?= $payment_result['status'] === 'success' ? '#2f855a' : '#c53030' ?>;
             transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(<?= $payment_result['status'] === 'success' ? '56, 161, 105' : '229, 62, 62' ?>, 0.3);
             text-decoration: none;
             color: white;
         }
         
-        .btn-success {
-            background: var(--success);
-            color: white;
+        .transaction-id {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
         }
         
-        .btn-success:hover {
-            background: #2f855a;
-            transform: translateY(-2px);
-            text-decoration: none;
-            color: white;
+        .transaction-id label {
+            display: block;
+            font-size: 12px;
+            color: #718096;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
         }
         
-        .btn-secondary {
-            background: white;
-            color: var(--text-medium);
-            border: 2px solid var(--border);
+        .transaction-id-value {
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            color: #2d3748;
+            font-weight: 600;
+            letter-spacing: 1px;
         }
         
-        .btn-secondary:hover {
-            background: var(--bg-light);
-            border-color: var(--primary);
-            text-decoration: none;
-        }
-        
-        /* Print Receipt Button */
-        .print-btn {
-            background: #f8f9fa;
-            color: var(--text-dark);
-            border: 2px dashed var(--border);
-        }
-        
-        .print-btn:hover {
-            background: #e9ecef;
-            border-style: solid;
-            text-decoration: none;
-        }
-        
-        /* Receipt Styles for Print */
-        @media print {
-            body {
-                background: white !important;
-                padding: 0;
-                margin: 0;
-            }
-            
-            .container {
-                max-width: none;
-                width: 100%;
-            }
-            
-            .result-container {
-                box-shadow: none;
-                border: 1px solid #000;
-                margin: 0;
-                padding: 20px;
-            }
-            
-            .actions, .btn {
-                display: none !important;
-            }
-            
-            .result-container::before {
-                display: none;
-            }
-        }
-        
-        /* Responsive Design */
+        /* Responsive */
         @media (max-width: 768px) {
-            .container {
-                padding: 15px;
+            .success-container {
+                padding: 40px 25px;
             }
             
-            .result-container {
-                padding: 25px 20px;
+            h1 {
+                font-size: 32px;
             }
             
-            .transaction-grid {
-                grid-template-columns: 1fr;
-                gap: 15px;
+            .amount-paid {
+                font-size: 36px;
             }
             
-            .balance-info {
-                flex-direction: column;
-            }
-            
-            .security-items {
-                grid-template-columns: 1fr;
-            }
-            
-            .actions {
-                flex-direction: column;
-                align-items: center;
-            }
-            
-            .btn {
-                width: 100%;
-                max-width: 300px;
+            .merchant-name {
+                font-size: 20px;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="result-container">
-            <div class="result-header">
-                <div class="result-icon">
-                    <i class="fas fa-<?= $payment_result['status'] === 'success' ? 'check' : 'times' ?>"></i>
-                </div>
-                <h2><?= $payment_result['status'] === 'success' ? 'Payment Successful!' : 'Payment Failed' ?></h2>
-                <p class="subtitle">
-                    <?= $payment_result['status'] === 'success' 
-                        ? 'Your payment has been processed successfully' 
-                        : 'We encountered an issue processing your payment' ?>
-                </p>
-            </div>
-            
-            <!-- Transaction Details -->
-            <div class="transaction-details">
-                <div class="transaction-grid">
-                    <?php if ($payment_result['status'] === 'success'): ?>
-                        <div class="detail-item">
-                            <div class="detail-label">Transaction ID</div>
-                            <div class="detail-value"><?= htmlspecialchars($payment_result['transaction_id']) ?></div>
-                        </div>
-                    <?php endif; ?>
-                    
-                    <div class="detail-item">
-                        <div class="detail-label">Order ID</div>
-                        <div class="detail-value"><?= htmlspecialchars($payment_result['order_id']) ?></div>
-                    </div>
-                    
-                    <div class="detail-item">
-                        <div class="detail-label">Merchant</div>
-                        <div class="detail-value"><?= htmlspecialchars($payment_result['merchant_name']) ?></div>
-                    </div>
-                    
-                    <div class="detail-item">
-                        <div class="detail-label">Amount</div>
-                        <div class="detail-value amount-value">
-                            <?= $payment_result['currency'] ?> <?= number_format($payment_result['amount'], 2) ?>
-                        </div>
-                    </div>
-                    
-                    <div class="detail-item">
-                        <div class="detail-label">Status</div>
-                        <div class="detail-value">
-                            <span class="status-badge status-<?= $payment_result['status'] === 'success' ? 'success' : 'failed' ?>">
-                                <i class="fas fa-<?= $payment_result['status'] === 'success' ? 'check-circle' : 'times-circle' ?>"></i>
-                                <?= ucfirst($payment_result['status']) ?>
-                            </span>
-                        </div>
-                    </div>
-                    
-                    <?php if ($payment_result['status'] === 'success'): ?>
-                        <div class="detail-item">
-                            <div class="detail-label">Completed At</div>
-                            <div class="detail-value"><?= htmlspecialchars($payment_result['completed_at']) ?></div>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-            
-            <?php if ($payment_result['status'] === 'failed'): ?>
-                <!-- Error Details -->
-                <div class="error-details">
-                    <h4>
-                        <i class="fas fa-exclamation-triangle"></i>
-                        Error Details
-                    </h4>
-                    <p><strong>Reason:</strong> <?= htmlspecialchars($payment_result['error']) ?></p>
-                    <p><strong>What to do:</strong> Please check your account balance and try again. If the issue persists, contact support.</p>
-                </div>
-            <?php else: ?>
-                <!-- Balance Update (Success only) -->
-                <!-- <div class="balance-update">
-                    <div class="balance-info">
-                        <div class="balance-item">
-                            <div class="balance-label">Amount Paid</div>
-                            <div class="balance-amount">-<?= $payment_result['currency'] ?> <?= number_format($payment_result['amount'], 2) ?></div>
-                        </div>
-                        <div class="balance-item">
-                            <div class="balance-label">Remaining Balance</div>
-                            <div class="balance-amount"><?= $payment_result['currency'] ?> <?= number_format($payment_result['user_balance'], 2) ?></div>
-                        </div> -->
-                    </div>
-                </div>
-                
-                <!-- Security Summary -->
-                <div class="security-summary">
-                    <h4>
-                        <i class="fas fa-shield-alt"></i>
-                        Security Verification Completed
-                    </h4>
-                    <div class="security-items">
-                        <div class="security-item">
-                            <i class="fas fa-user-check"></i>
-                            <span class="security-text">Face Recognition Verified</span>
-                        </div>
-                        <div class="security-item">
-                            <i class="fas fa-eye"></i>
-                            <span class="security-text">Liveness Detection Passed</span>
-                        </div>
-                        <div class="security-item">
-                            <i class="fas fa-lock"></i>
-                            <span class="security-text">PIN Authentication Successful</span>
-                        </div>
-                        <div class="security-item">
-                            <i class="fas fa-encrypt"></i>
-                            <span class="security-text">Transaction Encrypted</span>
-                        </div>
-                    </div>
-                </div>
-            <?php endif; ?>
-            
-            <!-- Action Buttons -->
-            <div class="actions">
-                <?php if ($payment_result['status'] === 'success'): ?>
-                    <button class="btn print-btn" onclick="window.print()">
-                        <i class="fas fa-print"></i>
-                        Print Receipt
-                    </button>
-                    
-                    <a href="../../dashboard.php" class="btn btn-success">
-                        <i class="fas fa-home"></i>
-                        Go to Dashboard
-                    </a>
-                    
-                    <a href="../../transactions.php" class="btn btn-secondary">
-                        <i class="fas fa-history"></i>
-                        View Transactions
-                    </a>
-                <?php else: ?>
-                    <a href="../../gateway/checkout.php" class="btn btn-primary">
-                        <i class="fas fa-redo"></i>
-                        Try Again
-                    </a>
-                    
-                    <!-- <a href="../../dashboard.php" class="btn btn-secondary">
-                        <i class="fas fa-home"></i>
-                        Go to Dashboard
-                    </a>
-                    
-                    <a href="../../support.php" class="btn btn-secondary">
-                        <i class="fas fa-life-ring"></i>
-                        Get Support
-                    </a> -->
-                <?php endif; ?>
-            </div>
+    <div class="success-container">
+        <div class="success-icon">
+            <i class="fas fa-<?= $payment_result['status'] === 'success' ? 'check' : 'times' ?>"></i>
         </div>
+        
+        <h1><?= $payment_result['status'] === 'success' ? 'Payment Successful!' : 'Payment Failed' ?></h1>
+        <p class="subtitle">
+            <?= $payment_result['status'] === 'success' 
+                ? 'Your payment has been processed successfully' 
+                : 'We encountered an issue processing your payment' ?>
+        </p>
+        
+        <div class="payment-summary">
+            <div class="amount-paid"><?= $payment_result['currency'] ?> <?= number_format($payment_result['amount'], 2) ?></div>
+            <div class="merchant-name"><?= htmlspecialchars($payment_result['merchant_name']) ?></div>
+            <div class="order-info">Order: <?= htmlspecialchars($payment_result['order_id']) ?></div>
+        </div>
+        
+        <?php if ($payment_result['status'] === 'success'): ?>
+            <div class="redirect-info">
+                <div class="redirect-text">
+                    <i class="fas fa-info-circle"></i>
+                    Returning to merchant in
+                </div>
+                <div class="countdown">
+                    <span class="countdown-number" id="countdown">5</span>
+                    <span>seconds</span>
+                </div>
+            </div>
+            
+            <div class="transaction-id">
+                <label>Transaction Reference</label>
+                <div class="transaction-id-value"><?= htmlspecialchars($payment_result['transaction_id']) ?></div>
+            </div>
+            
+            <div class="manual-return">
+                <button class="return-btn" onclick="returnToMerchant()">
+                    <i class="fas fa-arrow-left"></i>
+                    Return to <?= htmlspecialchars($payment_result['merchant_name']) ?>
+                </button>
+            </div>
+        <?php else: ?>
+            <div class="error-details">
+                <h4>
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Error Details
+                </h4>
+                <p><strong>Reason:</strong> <?= htmlspecialchars($payment_result['error']) ?></p>
+                <p><strong>What to do:</strong> Please check your account balance and try again. If the issue persists, contact support.</p>
+            </div>
+            
+            <div class="manual-return">
+                <button class="return-btn" onclick="returnToMerchant()">
+                    <i class="fas fa-redo"></i>
+                    Try Again
+                </button>
+            </div>
+        <?php endif; ?>
     </div>
 
     <script>
-        // Prevent back button after successful payment
+        // Auto redirect countdown (for success only)
         <?php if ($payment_result['status'] === 'success'): ?>
+        let countdown = 5;
+        const countdownElement = document.getElementById('countdown');
+        
+        const timer = setInterval(() => {
+            countdown--;
+            countdownElement.textContent = countdown;
+            
+            if (countdown <= 0) {
+                clearInterval(timer);
+                returnToMerchant();
+            }
+        }, 1000);
+        <?php endif; ?>
+        
+        function returnToMerchant() {
+            <?php if ($payment_result['status'] === 'success' && !empty($payment_result['return_url'])): ?>
+                // Build success URL with parameters
+                const params = new URLSearchParams();
+                params.append('status', 'success');
+                params.append('order_id', '<?= urlencode($payment_result['order_id']) ?>');
+                params.append('transaction_id', '<?= urlencode($payment_result['transaction_id']) ?>');
+                params.append('amount', '<?= $payment_result['amount'] ?>');
+                params.append('payment_id', '<?= urlencode($payment_result['transaction_id']) ?>');
+                
+                const returnUrl = '<?= htmlspecialchars($payment_result['return_url']) ?>';
+                const separator = returnUrl.includes('?') ? '&' : '?';
+                window.location.href = returnUrl + separator + params.toString();
+            <?php elseif ($payment_result['status'] === 'failed' && !empty($payment_result['cancel_url'])): ?>
+                // Redirect to cancel URL for failed payments
+                const params = new URLSearchParams();
+                params.append('status', 'failed');
+                params.append('order_id', '<?= urlencode($payment_result['order_id']) ?>');
+                params.append('error', '<?= urlencode($payment_result['error']) ?>');
+                params.append('amount', '<?= $payment_result['amount'] ?>');
+                
+                const cancelUrl = '<?= htmlspecialchars($payment_result['cancel_url']) ?>';
+                const separator = cancelUrl.includes('?') ? '&' : '?';
+                window.location.href = cancelUrl + separator + params.toString();
+            <?php else: ?>
+                // Fallback: redirect to gateway
+                alert('Returning to payment gateway...');
+                window.location.href = '../../gateway/checkout.php';
+            <?php endif; ?>
+        }
+        
+        // Prevent browser back button
         history.pushState(null, null, location.href);
         window.onpopstate = function () {
             history.go(1);
         };
-        <?php endif; ?>
         
-        // Add some visual feedback on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            // Add entrance animation delay for details
-            const details = document.querySelector('.transaction-details');
-            if (details) {
-                details.style.opacity = '0';
-                details.style.transform = 'translateY(20px)';
-                setTimeout(() => {
-                    details.style.transition = 'all 0.6s ease';
-                    details.style.opacity = '1';
-                    details.style.transform = 'translateY(0)';
-                }, 500);
-            }
-        });
-        
-        // Security: Clear any sensitive data from browser
+        // Clean up on page unload
         window.addEventListener('beforeunload', function() {
-            // Clear any cached form data
             if (sessionStorage) {
                 sessionStorage.clear();
             }

@@ -37,7 +37,7 @@ class Config {
     
     // Facial recognition API
     const FACE_API_URL = 'http://localhost:5000';
-    const FACE_CONFIDENCE_THRESHOLD = 0.7;
+    const FACE_CONFIDENCE_THRESHOLD = 0.6;
     const LIVENESS_THRESHOLD = 0.7;
     
     // Rate limiting

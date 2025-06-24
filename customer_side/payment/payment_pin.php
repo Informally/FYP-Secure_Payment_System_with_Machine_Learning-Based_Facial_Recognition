@@ -577,7 +577,7 @@ $csrf_token = generateCSRFToken();
                     </div>
                     <span style="color: var(--success); font-weight: 600;">Face Verified: <?= htmlspecialchars($payment_user['full_name']) ?></span>
                 </div>
-                <div class="user-details">
+                <!-- <div class="user-details">
                     <div class="detail-item">
                         <div class="detail-label">Username</div>
                         <div class="detail-value"><?= htmlspecialchars($payment_user['username']) ?></div>
@@ -586,7 +586,7 @@ $csrf_token = generateCSRFToken();
                         <div class="detail-label">Similarity Score</div>
                         <div class="detail-value"><?= number_format($payment_user['face_similarity'] * 100, 1) ?>%</div>
                     </div>
-                </div>
+                </div> -->
             </div>
             
             <!-- Payment Summary -->

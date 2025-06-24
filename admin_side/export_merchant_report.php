@@ -1,5 +1,5 @@
 <?php
-// export_merchant_report.php
+// export_merchant_report.php (SIMPLIFIED VERSION)
 require_once 'config/admin_config.php';
 
 // Require authentication
@@ -13,11 +13,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 $merchant_id = $_POST['export_merchant_id'] ?? '';
 $date_from = $_POST['export_date_from'] ?? date('Y-m-d', strtotime('-30 days'));
 $date_to = $_POST['export_date_to'] ?? date('Y-m-d');
-$format = $_POST['export_format'] ?? 'pdf';
-$include_summary = isset($_POST['include_summary']);
-$include_transactions = isset($_POST['include_transactions']);
-$include_charts = isset($_POST['include_charts']);
-$include_fees = isset($_POST['include_fees']);
 
 if (empty($merchant_id)) {
     die('Please select a merchant');
@@ -60,7 +55,7 @@ try {
     $transactions = $transactions_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $transactions_stmt->close();
     
-    // Calculate summary statistics
+    // Calculate SIMPLIFIED summary statistics (NO PLATFORM FEES)
     $total_transactions = count($transactions);
     $successful_transactions = array_filter($transactions, fn($t) => $t['status'] === 'success' && $t['transaction_type'] === 'payment');
     $failed_transactions = array_filter($transactions, fn($t) => $t['status'] === 'failed');
@@ -69,8 +64,6 @@ try {
     $total_revenue = array_sum(array_map(fn($t) => $t['status'] === 'success' && $t['transaction_type'] === 'payment' ? abs($t['amount']) : 0, $transactions));
     $total_refunds = array_sum(array_map(fn($t) => $t['status'] === 'refunded' || $t['transaction_type'] === 'refund' ? abs($t['amount']) : 0, $transactions));
     $net_revenue = $total_revenue - $total_refunds;
-    $platform_fees = $total_revenue * 0.029;
-    $merchant_earnings = $total_revenue - $platform_fees;
     
     $success_rate = $total_transactions > 0 ? (count($successful_transactions) / $total_transactions) * 100 : 0;
     $avg_transaction = count($successful_transactions) > 0 ? $total_revenue / count($successful_transactions) : 0;
@@ -96,109 +89,15 @@ try {
     
     $conn->close();
     
-    // Generate report based on format
-    switch ($format) {
-        // case 'csv':
-        //     generateCSV($merchant, $transactions, $date_from, $date_to);
-        //     break;
-        // case 'excel':
-        //     generateExcel($merchant, $transactions, $daily_data, $total_revenue, $platform_fees, $merchant_earnings, $success_rate, $date_from, $date_to);
-        //     break;
-        case 'pdf':
-        default:
-            generatePDF($merchant, $transactions, $daily_data, $total_revenue, $platform_fees, $merchant_earnings, $success_rate, $avg_transaction, $total_refunds, $include_summary, $include_transactions, $include_charts, $include_fees, $date_from, $date_to);
-            break;
-    }
+    // Generate simplified PDF report
+    generateSimplifiedPDF($merchant, $transactions, $daily_data, $total_revenue, $total_refunds, $net_revenue, $success_rate, $avg_transaction, $date_from, $date_to);
     
 } catch (Exception $e) {
     error_log("Export error: " . $e->getMessage());
     die('Error generating report: ' . $e->getMessage());
 }
 
-function generateCSV($merchant, $transactions, $date_from, $date_to) {
-    $filename = "merchant_report_{$merchant['merchant_id']}_{$date_from}_to_{$date_to}.csv";
-    
-    header('Content-Type: text/csv');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    
-    $output = fopen('php://output', 'w');
-    
-    // CSV Headers
-    fputcsv($output, [
-        'Transaction ID', 'Date', 'Time', 'Customer Name', 'Customer Email', 
-        'Amount (RM)', 'Platform Fee (RM)', 'Net Amount (RM)', 'Status', 'Type', 'Order ID'
-    ]);
-    
-    foreach ($transactions as $transaction) {
-        $amount = abs($transaction['amount']);
-        $fee = $transaction['status'] === 'success' && $transaction['transaction_type'] === 'payment' ? $amount * 0.029 : 0;
-        $net = $amount - $fee;
-        
-        fputcsv($output, [
-            $transaction['id'],
-            date('Y-m-d', strtotime($transaction['timestamp'])),
-            date('H:i:s', strtotime($transaction['timestamp'])),
-            $transaction['full_name'] ?? 'Unknown',
-            $transaction['email'] ?? 'N/A',
-            number_format($amount, 2),
-            number_format($fee, 2),
-            number_format($net, 2),
-            $transaction['status'],
-            $transaction['transaction_type'],
-            $transaction['order_id'] ?? 'N/A'
-        ]);
-    }
-    
-    fclose($output);
-}
-
-function generateExcel($merchant, $transactions, $daily_data, $total_revenue, $platform_fees, $merchant_earnings, $success_rate, $date_from, $date_to) {
-    // For Excel, we'll generate a comprehensive CSV with multiple sheets worth of data
-    $filename = "merchant_report_{$merchant['merchant_id']}_{$date_from}_to_{$date_to}.csv";
-    
-    header('Content-Type: application/vnd.ms-excel');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    
-    echo "MERCHANT FINANCIAL REPORT\n";
-    echo "Merchant: {$merchant['merchant_name']} ({$merchant['merchant_id']})\n";
-    echo "Period: {$date_from} to {$date_to}\n";
-    echo "Generated: " . date('Y-m-d H:i:s') . "\n\n";
-    
-    echo "FINANCIAL SUMMARY\n";
-    echo "Total Revenue,RM " . number_format($total_revenue, 2) . "\n";
-    echo "Platform Fees (2.9%),RM " . number_format($platform_fees, 2) . "\n";
-    echo "Your Earnings,RM " . number_format($merchant_earnings, 2) . "\n";
-    echo "Success Rate," . number_format($success_rate, 1) . "%\n";
-    echo "Total Transactions," . count($transactions) . "\n\n";
-    
-    echo "DAILY BREAKDOWN\n";
-    echo "Date,Revenue,Transactions,Success Rate\n";
-    foreach ($daily_data as $day) {
-        $day_success_rate = $day['transaction_count'] > 0 ? ($day['successful_count'] / $day['transaction_count']) * 100 : 0;
-        echo "{$day['date']},RM " . number_format($day['revenue'], 2) . ",{$day['transaction_count']}," . number_format($day_success_rate, 1) . "%\n";
-    }
-    
-    echo "\nTRANSACTION DETAILS\n";
-    echo "ID,Date,Time,Customer,Amount,Platform Fee,Your Earning,Status,Type\n";
-    
-    foreach ($transactions as $transaction) {
-        $amount = abs($transaction['amount']);
-        $fee = $transaction['status'] === 'success' && $transaction['transaction_type'] === 'payment' ? $amount * 0.029 : 0;
-        $earning = $amount - $fee;
-        
-        echo "{$transaction['id']}," .
-             date('Y-m-d', strtotime($transaction['timestamp'])) . "," .
-             date('H:i:s', strtotime($transaction['timestamp'])) . "," .
-             "\"{$transaction['full_name']}\"," .
-             number_format($amount, 2) . "," .
-             number_format($fee, 2) . "," .
-             number_format($earning, 2) . "," .
-             "{$transaction['status']}," .
-             "{$transaction['transaction_type']}\n";
-    }
-}
-
-function generatePDF($merchant, $transactions, $daily_data, $total_revenue, $platform_fees, $merchant_earnings, $success_rate, $avg_transaction, $total_refunds, $include_summary, $include_transactions, $include_charts, $include_fees, $date_from, $date_to) {
+function generateSimplifiedPDF($merchant, $transactions, $daily_data, $total_revenue, $total_refunds, $net_revenue, $success_rate, $avg_transaction, $date_from, $date_to) {
     $filename = "merchant_report_{$merchant['merchant_id']}_{$date_from}_to_{$date_to}.html";
     
     header('Content-Type: text/html');
@@ -220,17 +119,14 @@ function generatePDF($merchant, $transactions, $daily_data, $total_revenue, $pla
             .card-title { font-size: 14px; color: #666; margin-bottom: 5px; }
             .card-value { font-size: 24px; font-weight: bold; color: #333; }
             .revenue { border-left-color: #38a169; }
-            .fees { border-left-color: #ed8936; }
-            .earnings { border-left-color: #3182ce; }
             .success { border-left-color: #38a169; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
             th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
             th { background: #667eea; color: white; }
             tr:nth-child(even) { background: #f9f9f9; }
             .section-title { font-size: 20px; color: #667eea; margin: 30px 0 15px 0; border-bottom: 2px solid #667eea; padding-bottom: 5px; }
-            .fee-breakdown { background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 5px; margin: 20px 0; }
-            .highlight { color: #e74c3c; font-weight: bold; }
             .positive { color: #27ae60; font-weight: bold; }
+            .negative { color: #e74c3c; font-weight: bold; }
             @media print { body { margin: 0; } }
         </style>
     </head>
@@ -242,21 +138,23 @@ function generatePDF($merchant, $transactions, $daily_data, $total_revenue, $pla
             <div style="font-size: 12px; color: #999; margin-top: 10px;">Generated on <?= date('F j, Y \a\t g:i A') ?> by FacePay Admin</div>
         </div>
 
-        <?php if ($include_summary): ?>
+        <!-- SIMPLIFIED Financial Summary -->
         <div class="section-title">📊 Financial Summary</div>
         <div class="summary-grid">
             <div class="summary-card revenue">
                 <div class="card-title">Total Revenue</div>
                 <div class="card-value">RM <?= number_format($total_revenue, 2) ?></div>
             </div>
-            <div class="summary-card fees">
-                <div class="card-title">Platform Fees (2.9%)</div>
-                <div class="card-value">RM <?= number_format($platform_fees, 2) ?></div>
+            <?php if ($total_refunds > 0): ?>
+            <div class="summary-card">
+                <div class="card-title">Total Refunds</div>
+                <div class="card-value negative">RM <?= number_format($total_refunds, 2) ?></div>
             </div>
-            <div class="summary-card earnings">
-                <div class="card-title">Your Net Earnings</div>
-                <div class="card-value positive">RM <?= number_format($merchant_earnings, 2) ?></div>
+            <div class="summary-card revenue">
+                <div class="card-title">Net Revenue</div>
+                <div class="card-value positive">RM <?= number_format($net_revenue, 2) ?></div>
             </div>
+            <?php endif; ?>
             <div class="summary-card success">
                 <div class="card-title">Success Rate</div>
                 <div class="card-value"><?= number_format($success_rate, 1) ?>%</div>
@@ -273,48 +171,26 @@ function generatePDF($merchant, $transactions, $daily_data, $total_revenue, $pla
                 <div class="card-value">RM <?= number_format($avg_transaction, 2) ?></div>
             </div>
         </div>
-        <?php endif; ?>
 
-        <?php if ($include_fees): ?>
-        <div class="section-title">💰 Platform Fees Breakdown</div>
-        <div class="fee-breakdown">
-            <h4>How Platform Fees Are Calculated:</h4>
-            <p><strong>Rate:</strong> 2.9% per successful transaction</p>
-            <p><strong>Total Revenue:</strong> RM <?= number_format($total_revenue, 2) ?></p>
-            <p><strong>Platform Fees:</strong> RM <?= number_format($total_revenue, 2) ?> × 2.9% = <span class="highlight">RM <?= number_format($platform_fees, 2) ?></span></p>
-            <p><strong>Your Earnings:</strong> RM <?= number_format($total_revenue, 2) ?> - RM <?= number_format($platform_fees, 2) ?> = <span class="positive">RM <?= number_format($merchant_earnings, 2) ?></span></p>
-            
-            <?php if ($total_refunds > 0): ?>
-            <hr style="margin: 15px 0;">
-            <p><strong>Note:</strong> Refunds totaling RM <?= number_format($total_refunds, 2) ?> have been processed. Platform fees are not charged on refunded transactions.</p>
-            <?php endif; ?>
-        </div>
-        <?php endif; ?>
-
-        <?php if ($include_charts && !empty($daily_data)): ?>
+        <?php if (!empty($daily_data)): ?>
+        <!-- Daily Performance -->
         <div class="section-title">📈 Daily Performance</div>
         <table>
             <thead>
                 <tr>
                     <th>Date</th>
                     <th>Revenue</th>
-                    <th>Platform Fee</th>
-                    <th>Your Earnings</th>
                     <th>Transactions</th>
                     <th>Success Rate</th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($daily_data as $day): 
-                    $day_fee = $day['revenue'] * 0.029;
-                    $day_earnings = $day['revenue'] - $day_fee;
                     $day_success_rate = $day['transaction_count'] > 0 ? ($day['successful_count'] / $day['transaction_count']) * 100 : 0;
                 ?>
                 <tr>
                     <td><?= date('M j, Y', strtotime($day['date'])) ?></td>
-                    <td>RM <?= number_format($day['revenue'], 2) ?></td>
-                    <td>RM <?= number_format($day_fee, 2) ?></td>
-                    <td class="positive">RM <?= number_format($day_earnings, 2) ?></td>
+                    <td class="positive">RM <?= number_format($day['revenue'], 2) ?></td>
                     <td><?= $day['transaction_count'] ?></td>
                     <td><?= number_format($day_success_rate, 1) ?>%</td>
                 </tr>
@@ -323,7 +199,7 @@ function generatePDF($merchant, $transactions, $daily_data, $total_revenue, $pla
         </table>
         <?php endif; ?>
 
-        <?php if ($include_transactions): ?>
+        <!-- SIMPLIFIED Transaction Details -->
         <div class="section-title">📋 Transaction Details</div>
         <table>
             <thead>
@@ -332,31 +208,32 @@ function generatePDF($merchant, $transactions, $daily_data, $total_revenue, $pla
                     <th>Date & Time</th>
                     <th>Customer</th>
                     <th>Amount</th>
-                    <th>Platform Fee</th>
-                    <th>Your Earning</th>
-                    <th>Status</th>
                     <th>Type</th>
+                    <th>Status</th>
+                    <th>Payment Method</th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach (array_slice($transactions, 0, 100) as $transaction): // Limit to 100 for PDF
                     $amount = abs($transaction['amount']);
-                    $fee = $transaction['status'] === 'success' && $transaction['transaction_type'] === 'payment' ? $amount * 0.029 : 0;
-                    $earning = $amount - $fee;
                 ?>
                 <tr>
                     <td>#<?= $transaction['id'] ?></td>
                     <td><?= date('M j, Y H:i', strtotime($transaction['timestamp'])) ?></td>
-                    <td><?= htmlspecialchars($transaction['full_name'] ?? 'Unknown') ?></td>
-                    <td>RM <?= number_format($amount, 2) ?></td>
-                    <td>RM <?= number_format($fee, 2) ?></td>
-                    <td class="positive">RM <?= number_format($earning, 2) ?></td>
+                    <td>
+                        <?= htmlspecialchars($transaction['full_name'] ?? 'Unknown') ?><br>
+                        <small style="color: #666;"><?= htmlspecialchars($transaction['email'] ?? '') ?></small>
+                    </td>
+                    <td class="<?= $transaction['transaction_type'] === 'refund' ? 'negative' : 'positive' ?>">
+                        <?= $transaction['transaction_type'] === 'refund' ? '-' : '' ?>RM <?= number_format($amount, 2) ?>
+                    </td>
+                    <td style="text-transform: capitalize;"><?= htmlspecialchars($transaction['transaction_type']) ?></td>
                     <td>
                         <span style="color: <?= $transaction['status'] === 'success' ? '#27ae60' : ($transaction['status'] === 'failed' ? '#e74c3c' : '#f39c12') ?>">
                             <?= ucfirst($transaction['status']) ?>
                         </span>
                     </td>
-                    <td><?= ucfirst($transaction['transaction_type']) ?></td>
+                    <td style="text-transform: capitalize;"><?= htmlspecialchars($transaction['payment_method'] ?? 'N/A') ?></td>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -364,13 +241,23 @@ function generatePDF($merchant, $transactions, $daily_data, $total_revenue, $pla
         
         <?php if (count($transactions) > 100): ?>
         <p style="margin-top: 10px; font-style: italic; color: #666;">
-            Showing first 100 transactions. For complete data, please export as Excel or CSV format.
+            Showing first 100 transactions. For complete data, please contact admin.
         </p>
         <?php endif; ?>
+
+        <?php if ($total_refunds > 0): ?>
+        <!-- Refunds Summary -->
+        <div style="margin-top: 30px; padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px;">
+            <h4 style="color: #856404; margin-bottom: 10px;">📋 Refunds Summary</h4>
+            <p><strong>Total Refunded:</strong> RM <?= number_format($total_refunds, 2) ?></p>
+            <p><strong>Refunded Transactions:</strong> <?= count(array_filter($transactions, fn($t) => $t['status'] === 'refunded' || $t['transaction_type'] === 'refund')) ?></p>
+            <p style="margin-bottom: 0;"><strong>Net Revenue after Refunds:</strong> RM <?= number_format($net_revenue, 2) ?></p>
+        </div>
         <?php endif; ?>
 
         <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #ddd; text-align: center; color: #666; font-size: 12px;">
-            <p>This report is generated by FacePay Admin System</p>
+            <p>This simplified report is generated by FacePay Admin System</p>
+            <p>All amounts are in Malaysian Ringgit (MYR)</p>
             <p>For questions about this report, please contact your account manager</p>
         </div>
     </body>

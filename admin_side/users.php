@@ -830,6 +830,7 @@ $total_pages = ceil($total_users / $per_page);
                         <option value="">All Users</option>
                         <option value="active" <?= $status_filter === 'active' ? 'selected' : '' ?>>Active Only</option>
                         <option value="suspended" <?= $status_filter === 'suspended' ? 'selected' : '' ?>>Suspended Only</option>
+                        <option value="pending" <?= $status_filter === 'pending' ? 'selected' : '' ?>>Pending Only</option>
                     </select>
                 </div>
                 <button type="submit" class="btn btn-primary">

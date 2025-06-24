@@ -25,7 +25,7 @@ $stmt = $conn->prepare("
     FROM transactions t 
     LEFT JOIN users u ON t.user_id = u.id
     LEFT JOIN merchants m ON t.merchant_id = m.merchant_id
-    WHERE t.transaction_type = 'payment'
+    WHERE t.transaction_type IN ('payment', 'Welcome Bonus')
     ORDER BY t.timestamp DESC 
     LIMIT 5
 ");

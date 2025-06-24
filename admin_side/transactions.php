@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $conn->begin_transaction();
                 
                 try {
-                    // Get current wallet balance (similar to topup.php logic)
+                    // Get current wallet balance
                     $wallet_stmt = $conn->prepare("
                         SELECT balance_encrypted, balance 
                         FROM wallets 
@@ -55,7 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $current_balance = $wallet_data['balance'];
                     }
                     
-                    // Calculate new balance after refund
+                    // Calculate new balance after refund (full amount - no fees deducted)
                     $refund_amount = abs($transaction['amount']);
                     $old_balance = floatval($current_balance);
                     $new_balance = $old_balance + $refund_amount;
@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $update_stmt->execute();
                     $update_stmt->close();
                     
-                    // Create refund transaction record - FIXED to match your table structure
+                    // Create refund transaction record
                     $refund_stmt = $conn->prepare("
                         INSERT INTO transactions (
                             user_id, merchant_id, merchant_name, amount, status, 
@@ -115,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Commit transaction
                     $conn->commit();
                     
-                    // Log action with the refund reason in audit trail
+                    // Log action
                     $auth->logAuditAction($admin['id'], 'process_refund', 'transactions', $transaction_id, [
                         'refund_amount' => $refund_amount,
                         'reason' => $refund_reason,
@@ -231,15 +231,14 @@ $transactions_stmt->execute();
 $transactions = $transactions_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $transactions_stmt->close();
 
-// Get summary stats for the date range
+// Get summary stats for the date range (SIMPLIFIED - NO PLATFORM FEES)
 $stats_query = "
     SELECT 
         COUNT(*) as total_transactions,
         SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successful_transactions,
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_transactions,
         SUM(CASE WHEN status = 'success' AND transaction_type = 'payment' THEN ABS(amount) ELSE 0 END) as total_revenue,
-        SUM(CASE WHEN status = 'success' AND transaction_type = 'payment' THEN ABS(amount) * 0.029 ELSE 0 END) as total_fees,
-        COUNT(DISTINCT merchant_id) as active_merchants,
+        COUNT(DISTINCT CASE WHEN merchant_id IS NOT NULL THEN merchant_id END) as active_merchants,
         AVG(CASE WHEN status = 'success' AND transaction_type = 'payment' THEN ABS(amount) ELSE NULL END) as avg_transaction_amount
     FROM transactions
     WHERE DATE(timestamp) BETWEEN ? AND ?
@@ -940,10 +939,7 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
                 <h1 class="page-title">Transaction Management</h1>
                 <p class="page-subtitle">Monitor payments, revenue, and financial operations</p>
             </div>
-            <!-- <button class="export-btn" onclick="exportTransactions()">
-                <i class="fas fa-download"></i> Export Data
-            </button> -->
-            <button class="export-btn" onclick="exportMerchantReport()" style="margin-left: 10px; background: linear-gradient(135deg, var(--success), #27ae60);">
+            <button class="export-btn" onclick="exportMerchantReport()" style="background: linear-gradient(135deg, var(--success), #27ae60);">
                 <i class="fas fa-chart-line"></i> Merchant Report
             </button>
         </div>
@@ -955,7 +951,7 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
             </div>
         <?php endif; ?>
 
-        <!-- Stats -->
+        <!-- Stats (SIMPLIFIED - NO PLATFORM FEES) -->
         <div class="stats-grid">
             <div class="stat-card success">
                 <div class="stat-value success">RM <?= number_format($stats['total_revenue'], 2) ?></div>
@@ -968,10 +964,6 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
             <div class="stat-card info">
                 <div class="stat-value info"><?= number_format($success_rate, 1) ?>%</div>
                 <div class="stat-label">Success Rate</div>
-            </div>
-            <div class="stat-card warning">
-                <div class="stat-value warning">RM <?= number_format($stats['total_fees'], 2) ?></div>
-                <div class="stat-label">Platform Fees</div>
             </div>
             <div class="stat-card info">
                 <div class="stat-value info"><?= $stats['active_merchants'] ?></div>
@@ -1018,7 +1010,7 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div class="form-group">
+                <!-- <div class="form-group">
                     <label class="form-label">Status</label>
                     <select class="form-select" name="status">
                         <option value="">All Status</option>
@@ -1027,7 +1019,7 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
                         <option value="pending" <?= $status_filter === 'pending' ? 'selected' : '' ?>>Pending</option>
                         <option value="refunded" <?= $status_filter === 'refunded' ? 'selected' : '' ?>>Refunded</option>
                     </select>
-                </div>
+                </div> -->
                 <div class="form-group">
                     <label class="form-label">Type</label>
                     <select class="form-select" name="type">
@@ -1035,6 +1027,7 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
                         <option value="payment" <?= $type_filter === 'payment' ? 'selected' : '' ?>>Payment</option>
                         <option value="topup" <?= $type_filter === 'topup' ? 'selected' : '' ?>>Top-up</option>
                         <option value="refund" <?= $type_filter === 'refund' ? 'selected' : '' ?>>Refund</option>
+                        <option value="Welcome Bonus" <?= $type_filter === 'Welcome Bonus' ? 'selected' : '' ?>>Welcome Bonus</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -1211,7 +1204,7 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
                     </div>
 
                     <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 8px; font-size: 14px;">
-                        <strong>⚠️ Warning:</strong> This action will immediately refund the amount to the user's wallet and mark the original transaction as refunded. This action cannot be undone.
+                        <strong>⚠️ Warning:</strong> This action will immediately refund the full amount to the user's wallet and mark the original transaction as refunded. This action cannot be undone.
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -1222,7 +1215,7 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
         </div>
     </div>
 
-    <!-- Export Modal for Merchant Reports -->
+    <!-- SIMPLIFIED Export Modal for Merchant Reports -->
     <div id="exportModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -1253,44 +1246,13 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
                         </div>
                     </div>
 
-                    <div class="form-group" style="margin-bottom: 20px;">
-                        <label class="form-label">Report Format</label>
-                        <select class="form-input" name="export_format" required>
-                            <option value="pdf">PDF Report</option>
-                            <!-- <option value="excel">Excel Spreadsheet</option>
-                            <option value="csv">CSV Data</option> -->
-                        </select>
-                    </div>
-
-                    <div class="form-group" style="margin-bottom: 20px;">
-                        <label class="form-label">Include Sections</label>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
-                            <label style="display: flex; align-items: center; gap: 8px;">
-                                <input type="checkbox" name="include_summary" value="1" checked>
-                                <span>Financial Summary</span>
-                            </label>
-                            <label style="display: flex; align-items: center; gap: 8px;">
-                                <input type="checkbox" name="include_transactions" value="1" checked>
-                                <span>Transaction Details</span>
-                            </label>
-                            <label style="display: flex; align-items: center; gap: 8px;">
-                                <input type="checkbox" name="include_charts" value="1" checked>
-                                <span>Performance Charts</span>
-                            </label>
-                            <label style="display: flex; align-items: center; gap: 8px;">
-                                <input type="checkbox" name="include_fees" value="1" checked>
-                                <span>Platform Fees Breakdown</span>
-                            </label>
-                        </div>
-                    </div>
-
                     <div style="background: #e3f2fd; border: 1px solid #2196f3; padding: 15px; border-radius: 8px; font-size: 14px;">
                         <strong><i class="fas fa-info-circle"></i> Report Contents:</strong><br>
                         • Total Revenue & Transaction Count<br>
-                        • Platform Fees (2.9% breakdown)<br>
                         • Success/Failure Rate Analysis<br>
                         • Daily Performance Trends<br>
-                        • Detailed Transaction Log
+                        • Detailed Transaction Log<br>
+                        • Customer Purchase History
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -1393,11 +1355,10 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
                     </div>
 
                     <div>
-                        <h4 style="margin-bottom: 15px; color: var(--success);">Financial Details</h4>
+                        <h4 style="margin-bottom: 15px; color: var(--success);">Amount Details</h4>
                         <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; line-height: 1.8;">
                             <strong>Amount:</strong> RM ${Math.abs(transaction.amount).toFixed(2)}<br>
-                            <strong>Fee (2.9%):</strong> RM ${(Math.abs(transaction.amount) * 0.029).toFixed(2)}<br>
-                            <strong>Net Amount:</strong> RM ${(Math.abs(transaction.amount) - Math.abs(transaction.amount) * 0.029).toFixed(2)}
+                            <strong>Currency:</strong> ${transaction.currency || 'MYR'}
                         </div>
                     </div>
 
@@ -1432,12 +1393,6 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
             document.getElementById('refundModal').classList.add('show');
         }
 
-        function exportTransactions() {
-            const params = new URLSearchParams(window.location.search);
-            params.set('export', '1');
-            window.open('?' + params.toString(), '_blank');
-        }
-
         function exportMerchantReport() {
             document.getElementById('exportModal').classList.add('show');
         }
@@ -1461,39 +1416,14 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
             });
         });
 
-        // SIMPLIFIED Form validation for refund
+        // Form validation for refund
         document.getElementById('refundForm').addEventListener('submit', function(e) {
             if (!confirm('Are you sure you want to process this refund? This action cannot be undone.')) {
                 e.preventDefault();
             }
         });
 
-        // Keyboard shortcuts
-        document.addEventListener('keydown', function(e) {
-            // Escape to close any open modal
-            if (e.key === 'Escape') {
-                document.querySelectorAll('.modal.show').forEach(modal => {
-                    modal.classList.remove('show');
-                });
-            }
-            
-            // Ctrl+E to export
-            if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
-                e.preventDefault();
-                exportTransactions();
-            }
-        });
-
-        // Real-time updates every 30 seconds
-        setInterval(function() {
-            if (!document.hidden) {
-                // Could fetch updated stats here
-                console.log('Checking for transaction updates...');
-            }
-        }, 30000);
-
-        console.log('Transaction Management System loaded successfully');
-        console.log('Available shortcuts: Escape (Close Modal), Ctrl+E (Export)');
+        console.log('Transaction Management System loaded successfully (Simplified - No Platform Fees)');
     </script>
 </body>
 </html>

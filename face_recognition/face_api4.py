@@ -817,13 +817,13 @@ def verify_liveness_multimethod(frame_sequence, transaction_amount=0):
     
     # Keep original scoring weights
     weights = {
-        'blink': 0.10,
-        'head_movement': 0.10,
-        'optical_flow': 0.30,
-        'texture': 0.20,
+        'blink': 0.15,         
+        'head_movement': 0.15,  
+        'optical_flow': 0.40,  
+        'texture': 0.30,      
         'frequency': 0.15,
         'deep_learning': 0.15,
-        'deepfake': 0.20  # Your trained model now handles this
+        'deepfake': 0.20
     }
     
     total_weight = 0
@@ -1268,12 +1268,12 @@ def hybrid_recognition(input_embedding, user_claim=None):
         logger.info(f"Using direct comparison mode for {'user claim: '+user_claim if user_claim else 'small user base'}")
         if user_claim:
             cursor.execute("SELECT embedding FROM face_embeddings WHERE user_id = %s", (user_claim,))
-            cosine_threshold = 0.75
-            required_matches = 5
+            cosine_threshold = 0.55
+            required_matches = 3
         else:
             cursor.execute("SELECT user_id, embedding FROM face_embeddings")
-            cosine_threshold = 0.75
-            required_matches = 7
+            cosine_threshold = 0.55
+            required_matches = 5
         embeddings = cursor.fetchall()
         cursor.close()
         db.close()

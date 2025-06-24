@@ -107,9 +107,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 $wallet_stmt->bind_param("is", $new_user_db_id, $welcome_bonus);
                                 $wallet_stmt->execute();
 
-                                // Log welcome bonus transaction (simplified)
-                                $log_stmt = $conn->prepare("INSERT INTO transactions (user_id, amount, status) VALUES (?, ?, 'success')");
-                                $log_stmt->bind_param("is", $new_user_db_id, $welcome_bonus);
+                                // Log welcome bonus transaction with appropriate details
+                                $transaction_id = 'BONUS_' . strtoupper(uniqid());
+                                $log_stmt = $conn->prepare("
+                                    INSERT INTO transactions (user_id, transaction_id, amount, status, transaction_type, payment_method) 
+                                    VALUES (?, ?, ?, 'success', 'Welcome Bonus', 'System')
+                                ");
+                                $log_stmt->bind_param("isd", $new_user_db_id, $transaction_id, $welcome_bonus);
                                 $log_stmt->execute();
 
                                 // Send verification email using the function from config.php
