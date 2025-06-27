@@ -39,7 +39,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
                 $row = $result->fetch_assoc();
                 $stored_pin = $row['pin_code'] ?? null;
                 
-                if ($stored_pin && aes_decrypt($stored_pin) === $entered_pin) {
+                if ($stored_pin && password_verify($entered_pin, $stored_pin)) {
                     // Upgrade to sensitive authentication
                     SessionManager::setAuthLevel('sensitive', $user_id);
                     $auth_success = true;

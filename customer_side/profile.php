@@ -150,15 +150,12 @@ try {
                     } elseif (!preg_match('/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).{8,}$/', $new_password)) {
                         $error = "New password must be at least 8 characters and include uppercase, lowercase, number, and symbol.";
                     } else {
-                        // Verify current password
-                        $decrypted_password = aes_decrypt($user['password']);
-                        
-                        if ($current_password !== $decrypted_password) {
+                        if (!password_verify($current_password, $user['password'])) {
                             $error = "Current password is incorrect.";
                         } else {
-                            $encrypted_new_password = aes_encrypt($new_password);
+                            $password_hash = password_hash($new_password, PASSWORD_DEFAULT);
                             $stmt = $conn->prepare("UPDATE users SET password = ? WHERE id = ?");
-                            $stmt->bind_param("si", $encrypted_new_password, $user_db_id);
+                            $stmt->bind_param("si", $password_hash, $user_db_id);
                             
                             if ($stmt->execute()) {
                                 $success = "Password changed successfully!";
@@ -184,15 +181,12 @@ try {
                     } elseif (!preg_match('/^\d{6}$/', $new_pin)) {
                         $error = "New PIN must be exactly 6 digits.";
                     } else {
-                        // Verify current PIN
-                        $decrypted_pin = aes_decrypt($user['pin_code']);
-                        
-                        if ($current_pin !== $decrypted_pin) {
+                        if (!password_verify($current_pin, $user['pin_code'])) {
                             $error = "Current PIN is incorrect.";
                         } else {
-                            $encrypted_new_pin = aes_encrypt($new_pin);
+                            $pin_hash = password_hash($new_pin, PASSWORD_DEFAULT);
                             $stmt = $conn->prepare("UPDATE users SET pin_code = ? WHERE id = ?");
-                            $stmt->bind_param("si", $encrypted_new_pin, $user_db_id);
+                            $stmt->bind_param("si", $pin_hash, $user_db_id);
                             
                             if ($stmt->execute()) {
                                 $success = "PIN changed successfully!";

@@ -72,7 +72,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             }
                             
                             // Try both encrypted and plain text passwords
-                            $password_matches = ($password === $decrypted_password) || ($password === $user['password']);
+                            $password_matches = password_verify($password, $user['password']);
                             
                             // DEBUG - Remove after testing
                             error_log("LOGIN DEBUG - Input: " . $password);
@@ -85,6 +85,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 if (!$user['is_verified']) {
                                     $error = "Please verify your email address before logging in.";
                                     SecurityUtils::logSecurityEvent($user['user_id'], 'unverified_login_attempt', 'failure');
+                                } elseif ($user['account_status'] === 'suspended') {
+                                    $error = "Account is suspended. Please contact support.";
+                                    SecurityUtils::logSecurityEvent($user['user_id'], 'suspended_account_login', 'failure');
                                 } elseif ($user['account_status'] !== 'active' && $user['account_status'] !== 'pending') {
                                     $error = "Account is not active. Please contact support.";
                                     SecurityUtils::logSecurityEvent($user['user_id'], 'inactive_account_login', 'failure');

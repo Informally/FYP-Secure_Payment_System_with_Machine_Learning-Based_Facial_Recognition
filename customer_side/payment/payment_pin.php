@@ -64,8 +64,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         SecurityUtils::logSecurityEvent($payment_user['user_id'], 'payment_pin_account_error', 'failure');
                     } else {
                         // Simple PIN verification - direct comparison with pin_code field
-                        $decrypted_pin = aes_decrypt($user_data['pin_code']);
-                        if ($entered_pin === $decrypted_pin) {
+                        if (password_verify($entered_pin, $user_data['pin_code'])) {
                             // PIN correct - proceed with payment
                             $_SESSION['payment_user']['pin_verified'] = true;
                             $_SESSION['payment_user']['pin_verified_at'] = time();

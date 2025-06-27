@@ -96,9 +96,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && $step == 'reset') {
                 
                 if ($user) {
                     // Update password
-                    $encrypted_password = aes_encrypt($new_password);
+                    $password_hash = password_hash($new_password, PASSWORD_DEFAULT);
                     $update_stmt = $conn->prepare("UPDATE users SET password = ?, verification_token = NULL WHERE id = ?");
-                    $update_stmt->bind_param("si", $encrypted_password, $user['id']);
+                    $update_stmt->bind_param("si", $password_hash, $user['id']);
                     $update_stmt->execute();
                     
                     SecurityUtils::logSecurityEvent($user['user_id'], 'password_reset_success', 'success');

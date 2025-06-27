@@ -91,12 +91,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             $verification_token = bin2hex(random_bytes(32));
                             
                             // Encrypt sensitive data
-                            $encrypted_password = aes_encrypt($password);
-                            $encrypted_pin = aes_encrypt($pin);
+                            $password_hash = password_hash($password, PASSWORD_DEFAULT);
+                            $pin_hash = password_hash($pin, PASSWORD_DEFAULT);
 
                             // Insert user with MySQLi (matching your actual database structure)
                             $stmt = $conn->prepare("INSERT INTO users (user_id, username, full_name, email, password, pin_code, verification_token, is_verified) VALUES (?, ?, ?, ?, ?, ?, ?, 0)");
-                            $stmt->bind_param("sssssss", $user_id, $username, $full_name, $email, $encrypted_password, $encrypted_pin, $verification_token);
+                            $stmt->bind_param("sssssss", $user_id, $username, $full_name, $email, $password_hash, $pin_hash, $verification_token);
 
                             if ($stmt->execute()) {
                                 $new_user_db_id = $conn->insert_id; // MySQLi method

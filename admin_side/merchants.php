@@ -922,10 +922,9 @@ $conn->close();
                         <strong>🚀 Payment Gateway Integration (Like PayPal):</strong><br><br>
                         
                         <strong>1. Payment Button on Your Site:</strong><br>
-                        <code>&lt;form action="https://facepay.com/checkout" method="POST"&gt;<br>
+                        <code>&lt;form action="https://facepay.com/gateway/checkout.php" method="POST"&gt;<br>
                         &nbsp;&nbsp;&lt;input type="hidden" name="merchant_id" value="[YOUR_MERCHANT_ID]"&gt;<br>
-                        &nbsp;&nbsp;&lt;input type="hidden" name="amount" value="25.50"&gt;<br>
-                        &nbsp;&nbsp;&lt;input type="hidden" name="order_id" value="ORDER123"&gt;<br>
+                        &nbsp;&nbsp;&lt;input type="hidden" name="api_key" value="[YOUR_API_KEY]"&gt;<br>
                         &nbsp;&nbsp;&lt;input type="hidden" name="return_url" value="[YOUR_SUCCESS_URL]"&gt;<br>
                         &nbsp;&nbsp;&lt;input type="hidden" name="cancel_url" value="[YOUR_CANCEL_URL]"&gt;<br>
                         &nbsp;&nbsp;&lt;button type="submit"&gt;Pay with FacePay&lt;/button&gt;<br>

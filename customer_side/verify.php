@@ -47,16 +47,16 @@ if (!empty($token)) {
                     'welcome_bonus' => 50.00
                 ]);
                 
-                // Start session for user
-                SessionManager::start();
-                SessionManager::setAuthLevel('basic', $user['username']);
-                $_SESSION['username'] = $user['username'];
-                $_SESSION['user_db_id'] = $user['id'];
-                $_SESSION['authenticatedUserId'] = $user['username'];
-                $_SESSION['just_verified'] = true;
+                // // Start session for user
+                // SessionManager::start();
+                // SessionManager::setAuthLevel('basic', $user['username']);
+                // $_SESSION['username'] = $user['username'];
+                // $_SESSION['user_db_id'] = $user['id'];
+                // $_SESSION['authenticatedUserId'] = $user['username'];
+                // $_SESSION['just_verified'] = true;
                 
                 $message = "✅ Your email has been verified! Welcome bonus of RM 50.00 added to your wallet. Redirecting to dashboard...";
-                $redirect = true;
+                $redirect = false;
                 
             } else {
                 $message = "❌ Verification failed. Please try again.";
