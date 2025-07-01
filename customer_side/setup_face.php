@@ -800,9 +800,11 @@ $csrf_token = generateCSRFToken();
                         <div class="step-title">Liveness Verification</div>
                         <div class="step-description">Move your face naturally to verify you're real</div>
                     </div>
-                    <?php if (!$is_update): ?>
-
-                    <?php endif; ?>
+                    <!-- <div class="step-card">
+                        <div class="step-number">3</div>
+                        <div class="step-title">Face Registration</div>
+                        <div class="step-description">System saves your facial features securely</div>
+                    </div> -->
                 </div>
             </div>
             
@@ -884,6 +886,10 @@ $csrf_token = generateCSRFToken();
         const API_BASE_URL = "http://localhost:5000";
         const IS_UPDATE_MODE = <?= $is_update ? 'true' : 'false' ?>;
         
+        // 🔥 FIX: Use consistent user_id from PHP session
+        const PHP_USER_ID = '<?= $user_id ?>';
+        console.log('Using PHP User ID:', PHP_USER_ID);
+        
         // Global variables - Same as kiosk
         let stream;
         let frames = [];
@@ -891,6 +897,9 @@ $csrf_token = generateCSRFToken();
         let faceDetectionInterval;
         let retryCount = 0;
         const maxRetries = 3;
+        
+        // 🔥 Store the successful frame data for registration
+        let successfulFrameData = null;
         
         // Initialize page and camera immediately
         document.addEventListener('DOMContentLoaded', function() {
@@ -1130,7 +1139,7 @@ $csrf_token = generateCSRFToken();
             }, 250);
         }
         
-        // Verify with API - Same method as kiosk  
+        // 🔥 FIXED: Verify with API and store successful frame
         function verifyWithAPI() {
             updateStatus('🔍 Analyzing your identity and liveness...', 'info');
             document.getElementById('recordingIndicator').classList.remove('active');
@@ -1154,12 +1163,11 @@ $csrf_token = generateCSRFToken();
                 timeDiffs.reduce((sum, diff) => sum + Math.pow(diff - avgTimeDiff, 2), 0) / timeDiffs.length
             );
             
-            // Use exact same method as kiosk but with security_only flag
             const authData = {
                 image_base64: mainImageData,
                 additional_frames: additionalFramesData,
                 challenge_type: 'head_movement',
-                security_only: true,  // NEW: Only run security verification, not face recognition
+                security_only: true,  // Only run security verification, not face recognition
                 timing_data: {
                     timestamps: timestamps,
                     avg_diff: avgTimeDiff,
@@ -1176,7 +1184,15 @@ $csrf_token = generateCSRFToken();
                 };
             }
             
-            // Call your existing /authenticate endpoint exactly like kiosk
+            // 🔥 Add logging for debugging
+            console.log('Authentication data:', {
+                user_id: PHP_USER_ID,
+                security_only: authData.security_only,
+                image_size: mainImageData.length,
+                additional_frames: additionalFramesData.length
+            });
+            
+            // Call /authenticate endpoint for security verification
             fetch(`${API_BASE_URL}/authenticate`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1189,12 +1205,13 @@ $csrf_token = generateCSRFToken();
                 return res.json();
             })
             .then(data => {
-                // For registration: check security verification only
                 if (data.status === "success" && data.liveness_verified && data.security_only) {
-                    // Security passed, now register the face
+                    // 🔥 FIX: Store the successful frame for registration
+                    successfulFrameData = mainImageData;
+                    
                     updateStatus("✅ Security verified! Registering your face...", "success");
                     setTimeout(() => {
-                        registerFace(data.liveness_score || 0.8);
+                        registerFaceWithAPI(data.liveness_score || 0.8);
                     }, 1500);
                 } else {
                     retryCount++;
@@ -1227,56 +1244,68 @@ $csrf_token = generateCSRFToken();
             });
         }
         
-        // Register face using your existing /register endpoint
-        async function registerFace(livenessScore) {
+        // 🔥 FIXED: Register face using the SAME successful frame
+        function registerFaceWithAPI(livenessScore) {
             try {
                 updateStatus('📝 Registering your face...', 'info');
                 
-                // Capture final high-quality image
-                const canvas = document.createElement('canvas');
-                const context = canvas.getContext('2d');
-                
-                canvas.width = document.getElementById('video').videoWidth;
-                canvas.height = document.getElementById('video').videoHeight;
-                
-                context.scale(-1, 1); // Mirror like kiosk
-                context.drawImage(document.getElementById('video'), -canvas.width, 0, canvas.width, canvas.height);
-                
-                const finalImage = canvas.toDataURL('image/jpeg', 0.9);
-                
-                // Use your existing /register endpoint
-                const regResponse = await fetch(`${API_BASE_URL}/register`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        user_id: '<?= $user_id ?>',
-                        image_base64: finalImage
-                    })
-                });
-                
-                const regData = await regResponse.json();
-                
-                if (regData.status === 'success') {
-                    updateStatus('✅ Face registration successful!', 'success');
-                    
-                    // Submit to PHP
-                    document.getElementById('hiddenRegistrationSuccessful').value = 'true';
-                    document.getElementById('hiddenLivenessVerified').value = 'true';
-                    document.getElementById('hiddenLivenessScore').value = livenessScore;
-                    
-                    setTimeout(() => {
-                        document.getElementById('registrationForm').submit();
-                    }, 1500);
-                    
-                } else {
-                    throw new Error(regData.message || 'Registration failed');
+                // 🔥 KEY FIX: Use the stored successful frame, NOT a new capture
+                if (!successfulFrameData) {
+                    throw new Error('No successful frame data available for registration');
                 }
                 
+                const registrationData = {
+                    user_id: PHP_USER_ID, // 🔥 Use consistent user_id
+                    image_base64: successfulFrameData, // 🔥 Use the SAME frame that passed authentication
+                    override_existing: IS_UPDATE_MODE
+                };
+                
+                // 🔥 Add logging for debugging
+                console.log('Registration data:', {
+                    user_id: registrationData.user_id,
+                    override_existing: registrationData.override_existing,
+                    image_size: successfulFrameData.length,
+                    same_frame_as_auth: true
+                });
+                
+                fetch(`${API_BASE_URL}/register`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(registrationData)
+                })
+                .then(res => {
+                    if (!res.ok) {
+                        throw new Error(`HTTP error! status: ${res.status}`);
+                    }
+                    return res.json();
+                })
+                .then(regData => {
+                    if (regData.status === "success") {
+                        updateStatus("✅ Face registration successful! Your face is now registered for secure payments.", "success");
+                        
+                        // Submit to PHP with success data
+                        document.getElementById('hiddenRegistrationSuccessful').value = 'true';
+                        document.getElementById('hiddenLivenessVerified').value = 'true';
+                        document.getElementById('hiddenLivenessScore').value = livenessScore;
+                        
+                        setTimeout(() => {
+                            document.getElementById('registrationForm').submit();
+                        }, 1500);
+                        
+                    } else {
+                        throw new Error(regData.message || 'Registration failed');
+                    }
+                    
+                })
+                .catch(error => {
+                    console.error('Face registration error:', error);
+                    updateStatus('❌ Registration failed: ' + error.message, 'error');
+                    showRetryOption();
+                });
+                
             } catch (error) {
-                console.error('Face registration error:', error);
-                updateStatus('❌ Registration failed: ' + error.message, 'error');
+                console.error('Face registration setup error:', error);
+                updateStatus('❌ Registration setup failed: ' + error.message, 'error');
                 showRetryOption();
             }
         }
@@ -1330,6 +1359,7 @@ $csrf_token = generateCSRFToken();
             frames = [];
             faceDetected = false;
             retryCount = 0;
+            successfulFrameData = null; // 🔥 Reset successful frame data
             
             updateStatus('Ready to try again. Click "Start Registration" to begin.', 'info');
         }

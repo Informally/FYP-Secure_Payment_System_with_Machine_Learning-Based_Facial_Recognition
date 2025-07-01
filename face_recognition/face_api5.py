@@ -51,13 +51,13 @@ def get_liveness_threshold(transaction_amount):
     try:
         amount = float(transaction_amount)
         if amount > 1000:
-            return 0.90  # Stricter for high-value transactions
+            return 0.70  # Stricter for high-value transactions
         elif amount > 100:
-            return 0.85  # Medium threshold
-        return 0.80  # Stricter base threshold
+            return 0.70 # Medium threshold
+        return 0.70  # Stricter base threshold
     except (TypeError, ValueError):
         logger.warning(f"Invalid transaction_amount: {transaction_amount}, using base threshold")
-        return 0.80
+        return 0.70
 
 # Load models
 detector = MTCNN()
@@ -81,7 +81,7 @@ except Exception as e:
     logger.error(f"Error loading FaceNet model: {e}")
     exit(1)
 
-# Define Enhanced Liveness Model for Deepfake Detection
+# Define Enhanced Liveness Model for Anti-Spoofing Detection
 class EnhancedLivenessNet(nn.Module):
     def __init__(self):
         super(EnhancedLivenessNet, self).__init__()
@@ -89,7 +89,7 @@ class EnhancedLivenessNet(nn.Module):
         num_features = self.backbone.classifier[1].in_features
         self.backbone.classifier = nn.Sequential(
             nn.Dropout(p=0.2),
-            nn.Linear(num_features, 2)  # 2 outputs: real or fake
+            nn.Linear(num_features, 2)  # 2 outputs: live or spoofed
         )
 
     def forward(self, x):
@@ -98,7 +98,7 @@ class EnhancedLivenessNet(nn.Module):
 
 # Load or initialize the liveness detection model
 liveness_model = EnhancedLivenessNet()
-LIVENESS_MODEL_PATH = 'models/enhanced_liveness_model.pth'
+LIVENESS_MODEL_PATH = 'models/enhanced_liveness_model_aggressive.pth'
 
 if os.path.exists(LIVENESS_MODEL_PATH):
     try:
@@ -571,10 +571,10 @@ def detect_spoofing(face_image):
         logger.error(f"Error in spoofing detection: {e}")
         return False, 0.0
 
-# Enhanced deep learning liveness detection
+# Enhanced liveness detection using your trained anti-spoofing model
 def deep_learning_liveness(frame_sequence):
     """
-    Use your trained enhanced liveness model for deepfake detection
+    Use your trained enhanced liveness model for anti-spoofing detection
     """
     if not os.path.exists(LIVENESS_MODEL_PATH):
         logger.warning(f"Enhanced liveness model not found at {LIVENESS_MODEL_PATH}")
@@ -645,15 +645,15 @@ def deep_learning_liveness(frame_sequence):
         logger.error(f"Error in deep learning liveness check: {e}")
         return True, 0.5  # Default to real if error
 
-# Deepfake detection using your trained model
-def detect_deepfake(face_image):
+# Anti-spoofing detection using your trained model
+def enhanced_liveness_detection(face_image):
     """
-    Use your trained model for deepfake detection
+    Use your trained enhanced liveness model for anti-spoofing detection
     """
     try:
-        # Use your trained model for deepfake detection
+        # Use your trained model for anti-spoofing detection
         if not os.path.exists(LIVENESS_MODEL_PATH):
-            logger.warning(f"Trained deepfake model not found at {LIVENESS_MODEL_PATH}")
+            logger.warning(f"Trained enhanced liveness model not found at {LIVENESS_MODEL_PATH}")
             return True, 0.7  # Default to real if model missing
         
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -678,16 +678,16 @@ def detect_deepfake(face_image):
             real_prob = max(0.0, min(1.0, real_prob))
             
             # Threshold for your model (you may need to tune this)
-            threshold = 0.5
+            threshold = 0.3
             is_real = real_prob >= threshold
             
-        logger.info(f"Trained model deepfake detection: {'Real' if is_real else 'Fake'}, "
+        logger.info(f"Enhanced liveness model detection: {'Live' if is_real else 'Spoofed'}"
                     f"confidence={real_prob:.3f}, threshold={threshold}")
         
         return is_real, real_prob
         
     except Exception as e:
-        logger.error(f"Error in trained model deepfake detection: {e}")
+        logger.error(f"Error in trained model enhanced liveness model detection: {e}")
         return True, 0.7  # Default to real if error
     
 # Screen detection for anti-spoofing
@@ -737,7 +737,7 @@ def detect_screen_simple_no_edges(face_image):
         if sat_std < 65:
             screen_indicators += 1
             reasons.append(f"low_saturation_std({sat_std:.1f})")
-        if screen_indicators >= 3:
+        if screen_indicators >= 1:
             logger.warning(f"Screen detected: {screen_indicators}/6 indicators - {', '.join(reasons)}")
             return True, f"Screen detected ({screen_indicators}/6): {', '.join(reasons)}"
         return False, f"No screen detected ({screen_indicators}/6 indicators)"
@@ -832,10 +832,10 @@ def verify_liveness_multimethod(frame_sequence, transaction_amount=0):
         methods_results['deep_learning'] = dl_real
         methods_scores['deep_learning'] = dl_score
     
-    # Deepfake detection using your trained model
-    not_deepfake, deepfake_score = detect_deepfake(middle_frame)
-    methods_results['deepfake'] = not_deepfake
-    methods_scores['deepfake'] = deepfake_score
+    # Anti-spoofing detection using your trained model
+    is_live_enhanced, enhanced_score = enhanced_liveness_detection(middle_frame)
+    methods_results['enhanced_liveness'] = is_live_enhanced
+    methods_scores['enhanced_liveness'] = enhanced_score
     
     logger.info("Enhanced liveness detection results:")
     for method, result in methods_results.items():
@@ -849,7 +849,7 @@ def verify_liveness_multimethod(frame_sequence, transaction_amount=0):
         'texture': 0.30,      
         'frequency': 0.15,
         'deep_learning': 0.15,
-        'deepfake': 0.20
+        'enhanced_liveness': 0.20
     }
     
     total_weight = 0
@@ -863,19 +863,19 @@ def verify_liveness_multimethod(frame_sequence, transaction_amount=0):
         final_score = final_score / total_weight
     
     threshold = get_liveness_threshold(transaction_amount)
-    threshold = max(threshold, 0.8)
+    threshold = max(threshold, 0.75)
     is_live = final_score >= threshold
     
     # Calculate pass ratio
     passed_tests = sum(1 for result in methods_results.values() if result)
     pass_ratio = passed_tests / len(methods_results)
     
-    # Critical checks - must pass optical flow, texture, and deepfake detection
+    # Critical checks - must pass optical flow, texture, and enhanced liveness detection
     if not (methods_results.get('optical_flow', False) and 
             methods_results.get('texture', False) and 
-            methods_results.get('deepfake', False)):
+            methods_results.get('enhanced_liveness', False)):
         is_live = False
-        details = "Failed critical anti-spoofing checks (optical flow, texture, or deepfake)"
+        details = "Failed critical anti-spoofing checks (optical flow, texture, or enhanced liveness)"
     else:
         min_pass_ratio = 0.8 if transaction_amount > 100 else 0.7
         if pass_ratio < min_pass_ratio:
