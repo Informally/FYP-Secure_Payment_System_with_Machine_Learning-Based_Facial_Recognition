@@ -1,12 +1,9 @@
 <?php
 // business_integration/shopping_cart.php
-// DEMO VERSION - Kiosk Payment Interface
-
 const MERCHANT_ID = 'MCD';
 const FACEPAY_API_KEY = 'sk_1f55be80af366a8c3e87f53b14962a4f2ec4bbe14755af39';
 const FACEPAY_GATEWAY_URL = 'http://localhost/FYP/gateway/checkout.php';
-const SUCCESS_URL = 'http://localhost/FYP/business_integration/payment_success.php';
-const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php';
+// ✅ NEW: No more separate success/cancel URLs - gateway handles everything!
 ?>
 
 <!DOCTYPE html>
@@ -323,6 +320,31 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
             font-size: 14px;
         }
 
+        /* ✅ NEW: Gateway Integration Notice */
+        .gateway-notice {
+            background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
+            border: 2px solid #2196f3;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+            text-align: center;
+        }
+
+        .gateway-notice h4 {
+            color: #1565c0;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .gateway-notice p {
+            color: #424242;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
         /* Responsive Design */
         @media (max-width: 1024px) {
             .checkout-container {
@@ -399,6 +421,12 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
                 Choose Payment Method
             </div>
             <div class="section-content">
+                <!-- ✅ NEW: Gateway Integration Notice
+                <div class="gateway-notice">
+                    <h4><i class="fas fa-shield-alt"></i> Secure Payment Gateway</h4>
+                    <p>All payments are processed through FacePay's secure gateway. After payment, you'll be returned here automatically.</p>
+                </div> -->
+
                 <!-- Selected Payment Method Display -->
                 <div class="selected-method" id="selectedMethod">
                     <h4><i class="fas fa-check-circle"></i> Selected Payment Method</h4>
@@ -450,15 +478,13 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
                     </div>
                 </div>
 
-                <!-- Hidden gateway form -->
+                <!-- ✅ UPDATED: Hidden gateway form with new architecture -->
                 <form id="facepayGatewayForm" method="POST" action="<?= FACEPAY_GATEWAY_URL ?>" style="display: none;">
                     <input type="hidden" name="merchant_id" value="<?= MERCHANT_ID ?>">
                     <input type="hidden" name="api_key" value="<?= FACEPAY_API_KEY ?>">
                     <input type="hidden" name="amount" id="gateway_amount">
                     <input type="hidden" name="order_id" id="gateway_order_id">
                     <input type="hidden" name="currency" value="MYR">
-                    <input type="hidden" name="return_url" value="<?= SUCCESS_URL ?>">
-                    <input type="hidden" name="cancel_url" value="<?= CANCEL_URL ?>">
                     <input type="hidden" name="description" id="gateway_description">
                 </form>
 
@@ -539,7 +565,7 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
             const selectedMethodDiv = document.getElementById('selectedMethod');
             const selectedMethodText = document.getElementById('selectedMethodText');
             
-            selectedMethodText.textContent = 'FacePay - Secure facial recognition payment';
+            selectedMethodText.textContent = 'FacePay - Secure facial recognition payment via gateway';
             selectedMethodDiv.classList.add('show');
             
             // Enable proceed button
@@ -569,7 +595,13 @@ const CANCEL_URL = 'http://localhost/FYP/business_integration/payment_failed.php
             document.getElementById('gateway_order_id').value = orderId;
             document.getElementById('gateway_description').value = `McDonald's Kiosk Order - ${cart.length} items`;
             
-            // Submit to FacePay Gateway
+            // ✅ NEW: Submit to FacePay Gateway (which will handle success/failure and return here)
+            console.log('Submitting to FacePay Gateway...', {
+                amount: total.toFixed(2),
+                orderId: orderId,
+                merchant: '<?= MERCHANT_ID ?>'
+            });
+            
             document.getElementById('facepayGatewayForm').submit();
         }
 
