@@ -1,7 +1,6 @@
 <?php
-// login.php - Enhanced secure login system
+// login.php - Enhanced secure login system with centralized password obfuscation
 require_once 'config.php';
-// Note: aes_encrypt() and aes_decrypt() functions are now included in config.php
 
 // Initialize session management
 if (!SessionManager::start()) {
@@ -19,9 +18,11 @@ if (isset($_SESSION['authenticatedUserId'])) {
     exit();
 }
 
+// FIXED login.php rate limiting section - Only apply after failed password verification
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $username = SecurityUtils::sanitizeInput($_POST['username'] ?? '');
-    $password = $_POST['password'] ?? '';
+    $password = PasswordDeobfuscator::getPassword();
     $remember_me = isset($_POST['remember_me']);
     
     // CSRF token validation
@@ -29,120 +30,115 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $error = "Invalid request. Please try again.";
         SecurityUtils::logSecurityEvent('unknown', 'csrf_validation_failed', 'failure', ['username' => $username]);
     } else {
-        // Rate limiting check
-        $client_ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-        $rate_limit_key = 'login_' . $client_ip . '_' . hash('sha256', $username);
-        
-        if (!SecurityUtils::checkRateLimit($rate_limit_key, Config::MAX_LOGIN_ATTEMPTS, Config::LOGIN_LOCKOUT_TIME)) {
-            $lockout_message = "Too many failed login attempts. Please try again in " . (Config::LOGIN_LOCKOUT_TIME / 60) . " minutes.";
-            SecurityUtils::logSecurityEvent($username, 'rate_limit_exceeded', 'failure', ['ip' => $client_ip]);
+        if (empty($username) || empty($password)) {
+            $error = "Please enter both username and password.";
         } else {
-            if (empty($username) || empty($password)) {
-                $error = "Please enter both username and password.";
-            } else {
-                try {
-                    $conn = dbConnect(); // Use MySQLi connection
-                    
-                    // Get user with login attempt tracking (MySQLi style)
-                    $stmt = $conn->prepare("
-                        SELECT id, user_id, username, password, pin_code, is_verified, account_status, 
-                               failed_login_attempts, last_failed_login, locked_until
-                        FROM users 
-                        WHERE username = ? OR email = ?
-                    ");
-                    $stmt->bind_param("ss", $username, $username);
-                    $stmt->execute();
-                    $result = $stmt->get_result();
-                    $user = $result->fetch_assoc();
-                    
-                    if ($user) {
-                        // Check if account is locked
-                        if ($user['locked_until'] && strtotime($user['locked_until']) > time()) {
-                            $lockout_time = strtotime($user['locked_until']) - time();
-                            $lockout_message = "Account is temporarily locked. Try again in " . ceil($lockout_time / 60) . " minutes.";
-                            SecurityUtils::logSecurityEvent($user['user_id'], 'account_locked_attempt', 'failure');
-                        } else {
-                            // TEMPORARY FIX - Try both encrypted and plain text comparison
-                            $decrypted_password = '';
-                            try {
-                                $decrypted_password = aes_decrypt($user['password']);
-                            } catch (Exception $e) {
-                                error_log("Decryption failed: " . $e->getMessage());
-                                $decrypted_password = $user['password']; // Try plain text
-                            }
+            try {
+                $conn = dbConnect();
+                
+                // Get user with login attempt tracking
+                $stmt = $conn->prepare("
+                    SELECT id, user_id, username, password, pin_code, is_verified, account_status, 
+                           failed_login_attempts, last_failed_login, locked_until
+                    FROM users 
+                    WHERE username = ? OR email = ?
+                ");
+                $stmt->bind_param("ss", $username, $username);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $user = $result->fetch_assoc();
+                
+                if ($user) {
+                    // Check if account is locked due to previous failed attempts
+                    if ($user['locked_until'] && strtotime($user['locked_until']) > time()) {
+                        $lockout_time = strtotime($user['locked_until']) - time();
+                        $lockout_message = "Account is temporarily locked. Try again in " . ceil($lockout_time / 60) . " minutes.";
+                        SecurityUtils::logSecurityEvent($user['user_id'], 'account_locked_attempt', 'failure');
+                    } else {
+                        // Verify password FIRST
+                        $password_matches = password_verify($password, $user['password']);
+                        
+                        if ($password_matches) {
+                            // ✅ SUCCESSFUL LOGIN - Clear any rate limiting and proceed
                             
-                            // Try both encrypted and plain text passwords
-                            $password_matches = password_verify($password, $user['password']);
+                            // Clear rate limits for this user (successful login resets everything)
+                            $client_ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+                            $rate_limit_key = 'login_' . $client_ip . '_' . hash('sha256', $username);
                             
-                            // DEBUG - Remove after testing
-                            error_log("LOGIN DEBUG - Input: " . $password);
-                            error_log("LOGIN DEBUG - Decrypted: " . $decrypted_password);
-                            error_log("LOGIN DEBUG - Plain stored: " . $user['password']);
-                            error_log("LOGIN DEBUG - Match result: " . ($password_matches ? 'YES' : 'NO'));
+                            // Clear rate limits from database
+                            $clear_stmt = $conn->prepare("DELETE FROM rate_limits WHERE identifier = ?");
+                            $clear_stmt->bind_param("s", $rate_limit_key);
+                            $clear_stmt->execute();
                             
-                            if ($password_matches) {
-                                // Check account status
-                                if (!$user['is_verified']) {
-                                    $error = "Please verify your email address before logging in.";
-                                    SecurityUtils::logSecurityEvent($user['user_id'], 'unverified_login_attempt', 'failure');
-                                } elseif ($user['account_status'] === 'suspended') {
-                                    $error = "Account is suspended. Please contact support.";
-                                    SecurityUtils::logSecurityEvent($user['user_id'], 'suspended_account_login', 'failure');
-                                } elseif ($user['account_status'] !== 'active' && $user['account_status'] !== 'pending') {
-                                    $error = "Account is not active. Please contact support.";
-                                    SecurityUtils::logSecurityEvent($user['user_id'], 'inactive_account_login', 'failure');
-                                } else {
-                                    // Successful login - reset failed attempts (MySQLi style)
-                                    $update_stmt = $conn->prepare("
-                                        UPDATE users 
-                                        SET failed_login_attempts = 0, 
-                                            last_failed_login = NULL, 
-                                            locked_until = NULL,
-                                            last_login = NOW()
-                                        WHERE id = ?
-                                    ");
-                                    $update_stmt->bind_param("i", $user['id']);
-                                    $update_stmt->execute();
-                                    
-                                    // Set session with basic auth level
-                                    SessionManager::setAuthLevel('basic', $user['user_id'] ?? $user['username']);
-                                    $_SESSION['username'] = $user['username'];
-                                    $_SESSION['user_db_id'] = $user['id'];
-                                    $_SESSION['authenticatedUserId'] = $user['user_id'] ?? $user['username'];
-                                    
-                                    // Handle remember me (simplified for MySQLi)
-                                    if ($remember_me) {
-                                        $token = bin2hex(random_bytes(32));
-                                        $expires = date('Y-m-d H:i:s', time() + (30 * 24 * 60 * 60)); // 30 days
-                                        
-                                        // Store remember token (check if table exists first)
-                                        $check_table = $conn->query("SHOW TABLES LIKE 'remember_tokens'");
-                                        if ($check_table->num_rows > 0) {
-                                            $token_stmt = $conn->prepare("
-                                                INSERT INTO remember_tokens (user_id, token, expires_at) 
-                                                VALUES (?, ?, ?)
-                                                ON DUPLICATE KEY UPDATE token = ?, expires_at = ?
-                                            ");
-                                            $token_hash = hash('sha256', $token);
-                                            $token_stmt->bind_param("issss", $user['id'], $token_hash, $expires, $token_hash, $expires);
-                                            $token_stmt->execute();
-                                            
-                                            // Set cookie
-                                            setcookie('remember_token', $token, time() + (30 * 24 * 60 * 60), '/', '', true, true);
-                                        }
-                                    }
-                                    
-                                    SecurityUtils::logSecurityEvent($user['user_id'], 'login_success', 'success', [
-                                        'remember_me' => $remember_me,
-                                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown'
-                                    ]);
-                                    
-                                    // Redirect to dashboard
-                                    header("Location: dashboard.php");
-                                    exit();
-                                }
+                            // Check account status
+                            if (!$user['is_verified']) {
+                                $error = "Please verify your email address before logging in.";
+                                SecurityUtils::logSecurityEvent($user['user_id'], 'unverified_login_attempt', 'failure');
+                            } elseif ($user['account_status'] === 'suspended') {
+                                $error = "Account is suspended. Please contact support.";
+                                SecurityUtils::logSecurityEvent($user['user_id'], 'suspended_account_login', 'failure');
+                            } elseif ($user['account_status'] !== 'active' && $user['account_status'] !== 'pending') {
+                                $error = "Account is not active. Please contact support.";
+                                SecurityUtils::logSecurityEvent($user['user_id'], 'inactive_account_login', 'failure');
                             } else {
-                                // Failed login - increment counter (MySQLi style)
+                                // Successful login - reset failed attempts
+                                $update_stmt = $conn->prepare("
+                                    UPDATE users 
+                                    SET failed_login_attempts = 0, 
+                                        last_failed_login = NULL, 
+                                        locked_until = NULL,
+                                        last_login = NOW()
+                                    WHERE id = ?
+                                ");
+                                $update_stmt->bind_param("i", $user['id']);
+                                $update_stmt->execute();
+                                
+                                // Set session with basic auth level
+                                SessionManager::setAuthLevel('basic', $user['user_id'] ?? $user['username']);
+                                $_SESSION['username'] = $user['username'];
+                                $_SESSION['user_db_id'] = $user['id'];
+                                $_SESSION['authenticatedUserId'] = $user['user_id'] ?? $user['username'];
+                                
+                                // Handle remember me
+                                if ($remember_me) {
+                                    $token = bin2hex(random_bytes(32));
+                                    $expires = date('Y-m-d H:i:s', time() + (30 * 24 * 60 * 60)); // 30 days
+                                    
+                                    $check_table = $conn->query("SHOW TABLES LIKE 'remember_tokens'");
+                                    if ($check_table->num_rows > 0) {
+                                        $token_stmt = $conn->prepare("
+                                            INSERT INTO remember_tokens (user_id, token, expires_at) 
+                                            VALUES (?, ?, ?)
+                                            ON DUPLICATE KEY UPDATE token = ?, expires_at = ?
+                                        ");
+                                        $token_hash = hash('sha256', $token);
+                                        $token_stmt->bind_param("issss", $user['id'], $token_hash, $expires, $token_hash, $expires);
+                                        $token_stmt->execute();
+                                        
+                                        setcookie('remember_token', $token, time() + (30 * 24 * 60 * 60), '/', '', true, true);
+                                    }
+                                }
+                                
+                                SecurityUtils::logSecurityEvent($user['user_id'], 'login_success', 'success', [
+                                    'remember_me' => $remember_me,
+                                    'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown'
+                                ]);
+                                
+                                header("Location: dashboard.php");
+                                exit();
+                            }
+                        } else {
+                            // ❌ FAILED LOGIN - Apply rate limiting ONLY here
+                            
+                            $client_ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+                            $rate_limit_key = 'login_' . $client_ip . '_' . hash('sha256', $username);
+                            
+                            // Check rate limit ONLY after failed password
+                            if (!SecurityUtils::checkRateLimit($rate_limit_key, Config::MAX_LOGIN_ATTEMPTS, Config::LOGIN_LOCKOUT_TIME)) {
+                                $lockout_message = "Too many failed login attempts. Please try again in " . (Config::LOGIN_LOCKOUT_TIME / 60) . " minutes.";
+                                SecurityUtils::logSecurityEvent($username, 'rate_limit_exceeded', 'failure', ['ip' => $client_ip]);
+                            } else {
+                                // Failed login - increment counter
                                 $failed_attempts = $user['failed_login_attempts'] + 1;
                                 $lock_account = $failed_attempts >= Config::MAX_LOGIN_ATTEMPTS;
                                 
@@ -168,29 +164,36 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 }
                             }
                         }
+                    }
+                } else {
+                    // User not found - still apply rate limiting to prevent enumeration
+                    $client_ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+                    $rate_limit_key = 'login_' . $client_ip . '_' . hash('sha256', $username);
+                    
+                    if (!SecurityUtils::checkRateLimit($rate_limit_key, Config::MAX_LOGIN_ATTEMPTS, Config::LOGIN_LOCKOUT_TIME)) {
+                        $lockout_message = "Too many failed login attempts. Please try again in " . (Config::LOGIN_LOCKOUT_TIME / 60) . " minutes.";
                     } else {
                         $error = "Invalid username or password.";
-                        SecurityUtils::logSecurityEvent($username, 'login_user_not_found', 'failure');
                     }
-                    
-                    $conn->close();
-                    
-                } catch (Exception $e) {
-                    error_log("Login error: " . $e->getMessage());
-                    $error = "Login failed. Please try again later.";
+                    SecurityUtils::logSecurityEvent($username, 'login_user_not_found', 'failure');
                 }
+                
+                $conn->close();
+                
+            } catch (Exception $e) {
+                error_log("Login error: " . $e->getMessage());
+                $error = "Login failed. Please try again later.";
             }
         }
     }
 }
 
-// Check for remember me token (simplified for MySQLi)
+// Check for remember me token
 if (isset($_COOKIE['remember_token']) && !isset($_SESSION['authenticatedUserId'])) {
     try {
         $conn = dbConnect();
         $token_hash = hash('sha256', $_COOKIE['remember_token']);
         
-        // Check if remember_tokens table exists
         $check_table = $conn->query("SHOW TABLES LIKE 'remember_tokens'");
         if ($check_table->num_rows > 0) {
             $stmt = $conn->prepare("
@@ -205,7 +208,6 @@ if (isset($_COOKIE['remember_token']) && !isset($_SESSION['authenticatedUserId']
             $user = $result->fetch_assoc();
             
             if ($user) {
-                // Auto-login user
                 SessionManager::setAuthLevel('basic', $user['user_id'] ?? $user['username']);
                 $_SESSION['username'] = $user['username'];
                 $_SESSION['user_db_id'] = $user['id'];
@@ -216,7 +218,6 @@ if (isset($_COOKIE['remember_token']) && !isset($_SESSION['authenticatedUserId']
                 header("Location: dashboard.php");
                 exit();
             } else {
-                // Invalid or expired token
                 setcookie('remember_token', '', time() - 3600, '/', '', true, true);
             }
         }
@@ -555,6 +556,10 @@ $csrf_token = generateCSRFToken();
                 align-items: flex-start;
             }
         }
+        
+        .honeypot {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
@@ -591,6 +596,7 @@ $csrf_token = generateCSRFToken();
             
             <form method="POST" id="loginForm">
                 <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
+                <input type="text" name="website" class="honeypot" tabindex="-1" autocomplete="off">
                 
                 <div class="form-group">
                     <label for="username">Username or Email</label>
@@ -608,7 +614,7 @@ $csrf_token = generateCSRFToken();
                     <div class="input-group">
                         <input type="password" id="password" name="password" 
                                placeholder="Enter your password" 
-                               required <?= $lockout_message ? 'disabled' : '' ?>>
+                               required <?= $lockout_message ? 'disabled' : '' ?> autocomplete="off">
                         <i class="fas fa-lock input-icon"></i>
                     </div>
                 </div>
@@ -639,12 +645,15 @@ $csrf_token = generateCSRFToken();
                 <p>Don't have an account? <a href="register.php">Create one here</a></p>
             </div>
             
-            <div class="security-info">
+            <!-- <div class="security-info">
                 <i class="fas fa-shield-alt"></i>
-                Your login is protected with advanced security measures including rate limiting and session management.
-            </div>
+                Your login is protected with advanced security measures including password obfuscation and rate limiting.
+            </div> -->
         </div>
     </div>
+    
+    <!-- Include centralized password security -->
+    <script src="js/password-security.js"></script>
     
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -653,14 +662,12 @@ $csrf_token = generateCSRFToken();
             const usernameInput = document.getElementById('username');
             const passwordInput = document.getElementById('password');
             
-            // Focus first empty field
             if (!usernameInput.value) {
                 usernameInput.focus();
             } else if (!passwordInput.value) {
                 passwordInput.focus();
             }
             
-            // Form submission handling
             form.addEventListener('submit', function(e) {
                 if (submitBtn.disabled) {
                     e.preventDefault();
@@ -670,14 +677,12 @@ $csrf_token = generateCSRFToken();
                 submitBtn.disabled = true;
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing In...';
                 
-                // Re-enable after 3 seconds to prevent permanent lockout
                 setTimeout(() => {
                     submitBtn.disabled = false;
                     submitBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign In';
                 }, 3000);
             });
             
-            // Input validation
             const inputs = [usernameInput, passwordInput];
             inputs.forEach(input => {
                 input.addEventListener('input', function() {
@@ -687,6 +692,16 @@ $csrf_token = generateCSRFToken();
                         this.style.borderColor = 'var(--border)';
                     }
                 });
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    const activeElement = document.activeElement;
+                    if (activeElement.id === 'username') {
+                        e.preventDefault();
+                        passwordInput.focus();
+                    }
+                }
             });
         });
     </script>

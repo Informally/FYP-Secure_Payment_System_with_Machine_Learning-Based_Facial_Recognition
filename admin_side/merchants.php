@@ -1,5 +1,5 @@
 <?php
-// admin/merchants.php
+// admin/merchants.php - Updated for Main Page URL structure
 require_once 'config/admin_config.php';
 
 // Require authentication
@@ -14,13 +14,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     try {
         $conn = dbConnect();
-        $auth = getAdminAuth();
         
         if ($action === 'add_merchant') {
             $merchant_id = strtoupper(trim($_POST['merchant_id']));
             $name = trim($_POST['name']);
-            $return_url = trim($_POST['return_url'] ?? '');
-            $cancel_url = trim($_POST['cancel_url'] ?? '');
+            $main_page_url = trim($_POST['main_page_url'] ?? '');
             $webhook_url = trim($_POST['webhook_url'] ?? '');
             
             // Generate API key
@@ -34,18 +32,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception("Merchant ID already exists");
             }
             
-            // Insert new merchant with URLs
+            // Insert new merchant (using return_url as main_page_url, cancel_url as empty)
             $stmt = $conn->prepare("
                 INSERT INTO merchants (merchant_id, name, api_key, return_url, cancel_url, webhook_url, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
+                VALUES (?, ?, ?, ?, '', ?, 1)
             ");
-            $stmt->bind_param("ssssss", $merchant_id, $name, $api_key, $return_url, $cancel_url, $webhook_url);
+            $stmt->bind_param("sssss", $merchant_id, $name, $api_key, $main_page_url, $webhook_url);
             $stmt->execute();
             
-            // Log action
-            $auth->logAuditAction($admin['id'], 'create_merchant', 'merchant', $merchant_id, [
-                'name' => $name
-            ]);
+            // Log action using new security system
+            if (function_exists('logAdminSecurityEvent')) {
+                logAdminSecurityEvent($admin['username'], 'create_merchant', 'success', [
+                    'merchant_id' => $merchant_id,
+                    'admin_id' => $admin['id'],
+                    'name' => $name
+                ]);
+            }
             
             $message = "Merchant '{$name}' added successfully!";
             $message_type = 'success';
@@ -53,24 +55,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'update_merchant') {
             $id = intval($_POST['merchant_db_id']);
             $name = trim($_POST['name']);
-            $return_url = trim($_POST['return_url'] ?? '');
-            $cancel_url = trim($_POST['cancel_url'] ?? '');
+            $main_page_url = trim($_POST['main_page_url'] ?? '');
             $webhook_url = trim($_POST['webhook_url'] ?? '');
             $is_active = isset($_POST['is_active']) ? 1 : 0;
             
             $stmt = $conn->prepare("
                 UPDATE merchants 
-                SET name = ?, return_url = ?, cancel_url = ?, webhook_url = ?, is_active = ?
+                SET name = ?, return_url = ?, cancel_url = '', webhook_url = ?, is_active = ?
                 WHERE id = ?
             ");
-            $stmt->bind_param("sssdii", $name, $return_url, $cancel_url, $webhook_url, $is_active, $id);
+            $stmt->bind_param("sssii", $name, $main_page_url, $webhook_url, $is_active, $id);
             $stmt->execute();
             
-            // Log action
-            $auth->logAuditAction($admin['id'], 'update_merchant', 'merchant', $id, [
-                'name' => $name,
-                'is_active' => $is_active
-            ]);
+            // Log action using new security system
+            if (function_exists('logAdminSecurityEvent')) {
+                logAdminSecurityEvent($admin['username'], 'update_merchant', 'success', [
+                    'merchant_db_id' => $id,
+                    'admin_id' => $admin['id'],
+                    'name' => $name,
+                    'is_active' => $is_active
+                ]);
+            }
             
             $message = "Merchant updated successfully!";
             $message_type = 'success';
@@ -83,8 +88,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->bind_param("si", $new_api_key, $id);
             $stmt->execute();
             
-            // Log action
-            $auth->logAuditAction($admin['id'], 'regenerate_api_key', 'merchant', $id, []);
+            // Log action using new security system
+            if (function_exists('logAdminSecurityEvent')) {
+                logAdminSecurityEvent($admin['username'], 'regenerate_api_key', 'success', [
+                    'merchant_db_id' => $id,
+                    'admin_id' => $admin['id']
+                ]);
+            }
             
             $message = "API key regenerated successfully!";
             $message_type = 'success';
@@ -98,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Get all merchants with statistics (FIXED for payment gateway)
+// Get all merchants with statistics
 $conn = dbConnect();
 $merchants_query = "
     SELECT 
@@ -107,7 +117,7 @@ $merchants_query = "
         COALESCE(SUM(CASE WHEN DATE(t.timestamp) = CURRENT_DATE() AND t.status = 'success' THEN ABS(t.amount) ELSE 0 END), 0) as today_revenue,
         COALESCE(SUM(CASE WHEN t.status = 'success' THEN ABS(t.amount) ELSE 0 END), 0) as total_revenue
     FROM merchants m
-    LEFT JOIN transactions t ON m.merchant_id = t.merchant_id  -- Direct join
+    LEFT JOIN transactions t ON m.merchant_id = t.merchant_id
     GROUP BY m.id
     ORDER BY m.id DESC
 ";
@@ -588,6 +598,16 @@ $conn->close();
             cursor: pointer;
         }
 
+        .info-note {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 15px;
+            font-size: 13px;
+            color: #1565c0;
+        }
+
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
@@ -729,7 +749,7 @@ $conn->close();
                 <thead>
                     <tr>
                         <th>Merchant</th>
-                        <th>Integration URLs</th>
+                        <th>Main Page URL</th>
                         <th>Payments</th>
                         <th>Revenue</th>
                         <th>Status</th>
@@ -760,8 +780,7 @@ $conn->close();
                                 </td>
                                 <td>
                                     <div style="font-size: 13px;">
-                                        <div><strong>Return:</strong> <?= htmlspecialchars(substr($merchant['return_url'] ?? 'Not set', 0, 30)) ?><?= strlen($merchant['return_url'] ?? '') > 30 ? '...' : '' ?></div>
-                                        <div><strong>Cancel:</strong> <?= htmlspecialchars(substr($merchant['cancel_url'] ?? 'Not set', 0, 30)) ?><?= strlen($merchant['cancel_url'] ?? '') > 30 ? '...' : '' ?></div>
+                                        <?= htmlspecialchars(substr($merchant['return_url'] ?? 'Not set', 0, 40)) ?><?= strlen($merchant['return_url'] ?? '') > 40 ? '...' : '' ?>
                                     </div>
                                 </td>
                                 <td>
@@ -809,6 +828,10 @@ $conn->close();
             <form method="POST" id="addMerchantForm">
                 <input type="hidden" name="action" value="add_merchant">
                 <div class="modal-body">
+                    <div class="info-note">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>Gateway Architecture:</strong> FacePay will handle the payment process and then redirect users back to your specified main page with payment status parameters.
+                    </div>
                     <div class="form-grid">
                         <div class="form-group">
                             <label class="form-label" for="merchant_id">Merchant ID</label>
@@ -821,20 +844,13 @@ $conn->close();
                                    placeholder="e.g., McDonald's Malaysia">
                         </div>
                         <div class="form-group full-width">
-                            <label class="form-label" for="return_url">Return URL (Success)</label>
-                            <input type="url" class="form-input" id="return_url" name="return_url"
-                                   placeholder="https://mcdonalds.com/payment/success">
+                            <label class="form-label" for="main_page_url">Merchant Main Page URL</label>
+                            <input type="url" class="form-input" id="main_page_url" name="main_page_url" required
+                                   placeholder="http://localhost/FYP/business_integration/e-commerce.php">
+                            <small style="color: var(--text-light); font-size: 12px; margin-top: 5px; display: block;">
+                                Users will be redirected here after payment completion (success or failure) with status parameters.
+                            </small>
                         </div>
-                        <div class="form-group full-width">
-                            <label class="form-label" for="cancel_url">Cancel URL (Failed/Cancelled)</label>
-                            <input type="url" class="form-input" id="cancel_url" name="cancel_url"
-                                   placeholder="https://mcdonalds.com/payment/cancel">
-                        </div>
-                        <!-- <div class="form-group full-width">
-                            <label class="form-label" for="webhook_url">Webhook URL (Optional)</label>
-                            <input type="url" class="form-input" id="webhook_url" name="webhook_url"
-                                   placeholder="https://mcdonalds.com/webhooks/facepay">
-                        </div> -->
                         <div class="form-group full-width">
                             <div class="checkbox-group">
                                 <input type="checkbox" id="is_active" name="is_active" value="1" checked>
@@ -862,23 +878,22 @@ $conn->close();
                 <input type="hidden" name="action" value="update_merchant">
                 <input type="hidden" name="merchant_db_id" id="edit_merchant_db_id">
                 <div class="modal-body">
+                    <div class="info-note">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>Gateway Architecture:</strong> FacePay will handle the payment process and then redirect users back to your specified main page with payment status parameters.
+                    </div>
                     <div class="form-grid">
                         <div class="form-group full-width">
                             <label class="form-label" for="edit_name">Business Name</label>
                             <input type="text" class="form-input" id="edit_name" name="name" required>
                         </div>
                         <div class="form-group full-width">
-                            <label class="form-label" for="edit_return_url">Return URL (Success)</label>
-                            <input type="url" class="form-input" id="edit_return_url" name="return_url">
+                            <label class="form-label" for="edit_main_page_url">Merchant Main Page URL</label>
+                            <input type="url" class="form-input" id="edit_main_page_url" name="main_page_url" required>
+                            <small style="color: var(--text-light); font-size: 12px; margin-top: 5px; display: block;">
+                                Users will be redirected here after payment completion (success or failure) with status parameters.
+                            </small>
                         </div>
-                        <div class="form-group full-width">
-                            <label class="form-label" for="edit_cancel_url">Cancel URL (Failed/Cancelled)</label>
-                            <input type="url" class="form-input" id="edit_cancel_url" name="cancel_url">
-                        </div>
-                        <!-- <div class="form-group full-width">
-                            <label class="form-label" for="edit_webhook_url">Webhook URL (Optional)</label>
-                            <input type="url" class="form-input" id="edit_webhook_url" name="webhook_url">
-                        </div> -->
                         <div class="form-group full-width">
                             <div class="checkbox-group">
                                 <input type="checkbox" id="edit_is_active" name="is_active" value="1">
@@ -919,46 +934,37 @@ $conn->close();
                 <div class="form-group">
                     <label class="form-label">Payment Gateway Integration</label>
                     <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; font-size: 13px; line-height: 1.5;">
-                        <strong>🚀 Payment Gateway Integration (Like PayPal):</strong><br><br>
+                        <strong>🚀 Payment Gateway Integration:</strong><br><br>
                         
                         <strong>1. Payment Button on Your Site:</strong><br>
                         <code>&lt;form action="https://facepay.com/gateway/checkout.php" method="POST"&gt;<br>
                         &nbsp;&nbsp;&lt;input type="hidden" name="merchant_id" value="[YOUR_MERCHANT_ID]"&gt;<br>
                         &nbsp;&nbsp;&lt;input type="hidden" name="api_key" value="[YOUR_API_KEY]"&gt;<br>
-                        &nbsp;&nbsp;&lt;input type="hidden" name="return_url" value="[YOUR_SUCCESS_URL]"&gt;<br>
-                        &nbsp;&nbsp;&lt;input type="hidden" name="cancel_url" value="[YOUR_CANCEL_URL]"&gt;<br>
+                        &nbsp;&nbsp;&lt;input type="hidden" name="amount" value="25.50"&gt;<br>
+                        &nbsp;&nbsp;&lt;input type="hidden" name="order_id" value="ORDER123"&gt;<br>
+                        &nbsp;&nbsp;&lt;input type="hidden" name="description" value="Order Description"&gt;<br>
                         &nbsp;&nbsp;&lt;button type="submit"&gt;Pay with FacePay&lt;/button&gt;<br>
                         &lt;/form&gt;</code><br><br>
                         
                         <strong>2. Customer Flow:</strong><br>
                         • Customer clicks "Pay with FacePay"<br>
-                        • Redirected to FacePay for face scan + PIN<br>
-                        • After payment, returned to your success/cancel URL<br><br>
+                        • Redirected to FacePay for face scan + PIN verification<br>
+                        • FacePay processes payment and shows result page<br>
+                        • Customer redirected back to your main page with status<br><br>
                         
-                        <strong>3. Return Parameters:</strong><br>
-                        Success: <code>your-site.com/success?payment_id=PAY123&status=success&amount=25.50</code><br>
-                        Failed: <code>your-site.com/cancel?error=insufficient_funds&order_id=ORDER123</code>
+                        <strong>3. Return Parameters (Your Main Page):</strong><br>
+                        Success: <code>your-main-page.php?payment=success&order_id=ORDER123&amount=25.50</code><br>
+                        Failed: <code>your-main-page.php?payment=failed&order_id=ORDER123&reason=cancelled</code><br><br>
+                        
+                        <strong>4. Handle Return in Your Main Page:</strong><br>
+                        <code>if ($_GET['payment'] === 'success') {<br>
+                        &nbsp;&nbsp;// Show success message, update order status<br>
+                        } elseif ($_GET['payment'] === 'failed') {<br>
+                        &nbsp;&nbsp;// Show failure message, keep cart intact<br>
+                        }</code>
                     </div>
                 </div>
-                <!-- <div class="form-group">
-                    <label class="form-label">Advanced API Endpoints (Optional)</label>
-                    <div style="background: #e8f4f8; padding: 15px; border-radius: 8px; font-size: 13px; line-height: 1.5;">
-                        <strong>🔧 Direct API Integration:</strong><br><br>
-                        
-                        <strong>Face Recognition:</strong><br>
-                        POST https://facepay.com/api/authenticate<br>
-                        Headers: Authorization: Bearer [API_KEY]<br><br>
-                        
-                        <strong>Payment Processing:</strong><br>
-                        POST https://facepay.com/api/process_payment<br>
-                        Headers: Authorization: Bearer [API_KEY]<br><br>
-                        
-                        <strong>Transaction Status:</strong><br>
-                        GET https://facepay.com/api/transaction_status?id=[PAYMENT_ID]<br>
-                        Headers: Authorization: Bearer [API_KEY]
-                    </div>
-                </div>
-            </div> -->
+            </div>
             <div class="modal-footer">
                 <button type="button" class="btn-cancel" onclick="closeModal('apiKeyModal')">Close</button>
             </div>
@@ -978,11 +984,7 @@ $conn->close();
         function editMerchant(merchant) {
             document.getElementById('edit_merchant_db_id').value = merchant.id;
             document.getElementById('edit_name').value = merchant.name;
-            document.getElementById('edit_return_url').value = merchant.return_url || '';
-            document.getElementById('edit_cancel_url').value = merchant.cancel_url || '';
-            // Only set webhook_url if the input exists (uncomment if you add the input in the modal)
-            // var webhookInput = document.getElementById('edit_webhook_url');
-            // if (webhookInput) webhookInput.value = merchant.webhook_url || '';
+            document.getElementById('edit_main_page_url').value = merchant.return_url || '';
             document.getElementById('edit_is_active').checked = merchant.is_active == 1;
             
             document.getElementById('editMerchantModal').classList.add('show');
@@ -1046,6 +1048,7 @@ $conn->close();
         document.getElementById('addMerchantForm').addEventListener('submit', function(e) {
             const merchantId = document.getElementById('merchant_id').value;
             const name = document.getElementById('name').value;
+            const mainPageUrl = document.getElementById('main_page_url').value;
             
             if (merchantId.length < 2) {
                 e.preventDefault();
@@ -1056,6 +1059,12 @@ $conn->close();
             if (name.length < 3) {
                 e.preventDefault();
                 alert('Business name must be at least 3 characters long');
+                return;
+            }
+            
+            if (!mainPageUrl || !mainPageUrl.startsWith('http')) {
+                e.preventDefault();
+                alert('Please enter a valid main page URL starting with http:// or https://');
                 return;
             }
         });
@@ -1107,6 +1116,11 @@ $conn->close();
             const merchantIdInput = document.getElementById('merchant_id');
             if (merchantIdInput) {
                 merchantIdInput.title = 'Use a short, unique identifier like MCD for McDonald\'s or KFC for KFC';
+            }
+            
+            const mainPageUrlInput = document.getElementById('main_page_url');
+            if (mainPageUrlInput) {
+                mainPageUrlInput.title = 'This is where customers will be redirected after payment completion';
             }
         });
 

@@ -1,5 +1,5 @@
 <?php
-// forgot_password.php - Simple Password Reset System
+// forgot_password.php - Simple Password Reset System with Forced Re-login
 require_once 'config.php';
 
 // Check if user is already logged in
@@ -74,8 +74,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && $step == 'reset') {
     if (!validateCSRFToken($_POST['csrf_token'] ?? '')) {
         $error = "Invalid request. Please try again.";
     } else {
-        $new_password = $_POST['new_password'] ?? '';
-        $confirm_password = $_POST['confirm_password'] ?? '';
+        $new_password = PasswordDeobfuscator::getPassword('new_password');
+        $confirm_password = PasswordDeobfuscator::getPassword('confirm_password');
         
         if (empty($new_password) || empty($confirm_password)) {
             $error = "Please fill in both password fields.";
@@ -88,22 +88,31 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && $step == 'reset') {
                 $conn = dbConnect();
                 
                 // Verify token
-                $stmt = $conn->prepare("SELECT id, user_id, full_name, email FROM users WHERE verification_token = ?");
+                $stmt = $conn->prepare("SELECT id, user_id, username, full_name, email FROM users WHERE verification_token = ?");
                 $stmt->bind_param("s", $token);
                 $stmt->execute();
                 $result = $stmt->get_result();
                 $user = $result->fetch_assoc();
                 
                 if ($user) {
-                    // Update password
+                    // Update password and clear token
                     $password_hash = password_hash($new_password, PASSWORD_DEFAULT);
                     $update_stmt = $conn->prepare("UPDATE users SET password = ?, verification_token = NULL WHERE id = ?");
                     $update_stmt->bind_param("si", $password_hash, $user['id']);
                     $update_stmt->execute();
                     
-                    SecurityUtils::logSecurityEvent($user['user_id'], 'password_reset_success', 'success');
+                    // 🔐 SECURITY: Invalidate any existing sessions for this user
+                    // Clear any remember tokens for this user
+                    $clear_remember = $conn->prepare("DELETE FROM remember_tokens WHERE user_id = ?");
+                    $clear_remember->bind_param("i", $user['id']);
+                    $clear_remember->execute();
                     
-                    $success = "Your password has been successfully updated! You can now sign in with your new password.";
+                    SecurityUtils::logSecurityEvent($user['user_id'], 'password_reset_success', 'success', [
+                        'method' => 'forgot_password',
+                        'forced_logout' => true
+                    ]);
+                    
+                    $success = "Your password has been successfully updated! For security reasons, please login with your new password.";
                     $step = 'complete';
                 } else {
                     $error = "Invalid or expired reset link.";
@@ -157,6 +166,7 @@ $csrf_token = generateCSRFToken();
             --primary-dark: #2980b9;
             --success: #38a169;
             --error: #e53e3e;
+            --warning: #ed8936;
             --text-dark: #2d3748;
             --text-medium: #4a5568;
             --text-light: #718096;
@@ -317,6 +327,7 @@ $csrf_token = generateCSRFToken();
             justify-content: center;
             gap: 10px;
             margin-bottom: 25px;
+            text-decoration: none;
         }
         
         .btn:hover {
@@ -332,6 +343,19 @@ $csrf_token = generateCSRFToken();
         
         .btn-success {
             background: linear-gradient(135deg, var(--success), #48bb78);
+        }
+        
+        .btn-success:hover {
+            box-shadow: 0 8px 25px rgba(56, 161, 105, 0.3);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(135deg, var(--text-light), #4a5568);
+            margin-bottom: 15px;
+        }
+        
+        .btn-secondary:hover {
+            box-shadow: 0 8px 25px rgba(74, 85, 104, 0.3);
         }
         
         .message {
@@ -356,6 +380,19 @@ $csrf_token = generateCSRFToken();
             background-color: #f0fff4;
             color: var(--success);
             border: 1px solid #c6f6d5;
+        }
+        
+        .security-notice {
+            background-color: #fff7ed;
+            color: var(--warning);
+            border: 1px solid #fed7aa;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         
         .form-footer {
@@ -502,9 +539,19 @@ $csrf_token = generateCSRFToken();
                     <span><?= htmlspecialchars($success) ?></span>
                 </div>
                 
-                <a href="login.php" class="btn btn-success" style="text-decoration: none;">
+                <div class="security-notice">
+                    <i class="fas fa-shield-alt"></i>
+                    <span>For security, all existing sessions have been invalidated. Please login with your new password.</span>
+                </div>
+                
+                <a href="login.php" class="btn btn-success">
                     <i class="fas fa-sign-in-alt"></i>
-                    Sign In Now
+                    Login with New Password
+                </a>
+                
+                <a href="scan.php" class="btn btn-secondary">
+                    <i class="fas fa-camera"></i>
+                    Login with Face Recognition
                 </a>
             <?php endif; ?>
             
@@ -513,12 +560,15 @@ $csrf_token = generateCSRFToken();
                     <p>Remember your password? <a href="login.php">Sign In</a></p>
                     <p style="margin-top: 8px;">Or try <a href="scan.php">Face Recognition</a></p>
                 <?php else: ?>
-                    <p>Or try <a href="scan.php">Face Recognition Login</a></p>
+                    <p>Need help? <a href="mailto:support@facepay.com">Contact Support</a></p>
                 <?php endif; ?>
             </div>
         </div>
     </div>
     
+    <!-- Include centralized password security -->
+    <script src="js/password-security.js"></script>
+
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             // Focus first input

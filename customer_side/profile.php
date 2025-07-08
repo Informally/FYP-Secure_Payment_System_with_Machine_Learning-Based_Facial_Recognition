@@ -139,9 +139,9 @@ try {
                     break;
                     
                 case 'change_password':
-                    $current_password = $_POST['current_password'] ?? '';
-                    $new_password = $_POST['new_password'] ?? '';
-                    $confirm_password = $_POST['confirm_password'] ?? '';
+                    $current_password = PasswordDeobfuscator::getPassword('current_password');
+                    $new_password = PasswordDeobfuscator::getPassword('new_password');
+                    $confirm_password = PasswordDeobfuscator::getPassword('confirm_password');
                     
                     if (empty($current_password) || empty($new_password) || empty($confirm_password)) {
                         $error = "All password fields are required.";
@@ -173,8 +173,9 @@ try {
                     break;
                     
                 case 'change_pin':
-                    $current_pin = $_POST['current_pin'] ?? '';
-                    $new_pin = implode('', $_POST['new_pin'] ?? []);
+                    $current_pin = PasswordDeobfuscator::getPassword('current_pin');
+                    $new_pin_array = PasswordDeobfuscator::getPin(); // For new_pin[] arrays
+                    $new_pin = implode('', $new_pin_array);
                     
                     if (empty($current_pin) || empty($new_pin)) {
                         $error = "Current PIN and new PIN are required.";
@@ -1052,6 +1053,9 @@ $csrf_token = generateCSRFToken();
             </div>
         </div>
     </main>
+
+    <!-- Include centralized password security -->
+    <script src="js/password-security.js"></script>
 
     <script>
         // Tab switching functionality

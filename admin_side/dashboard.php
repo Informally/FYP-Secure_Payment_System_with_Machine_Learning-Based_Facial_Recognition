@@ -795,9 +795,9 @@ $conn->close();
             </div>
         </div>
 
-        <!-- Bottom Grid -->
+        <!-- Bottom Grid
         <div class="dashboard-grid">
-            <!-- System Alerts -->
+            System Alerts
             <div class="card">
                 <div class="card-header">
                     <div class="card-title">
@@ -826,7 +826,7 @@ $conn->close();
                         <?php endforeach; ?>
                     <?php endif; ?>
                 </div>
-            </div>
+            </div> -->
 
             <!-- Top Merchants -->
             <div class="card">

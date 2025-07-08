@@ -25,7 +25,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if ($stmt->affected_rows > 0) {
                 // Log the action
-                $auth->logAuditAction($admin['id'], 'suspend_user', 'users', $user_id, [
+                logAdminSecurityEvent($admin['username'], 'suspend_user', 'success', [
+                    'user_id' => $user_id,
+                    'admin_id' => $admin['id'],
                     'status' => 'suspended'
                 ]);
                 
@@ -47,7 +49,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if ($stmt->affected_rows > 0) {
                 // Log the action
-                $auth->logAuditAction($admin['id'], 'activate_user', 'users', $user_id, [
+                logAdminSecurityEvent($admin['username'], 'activate_user', 'success', [
+                    'user_id' => $user_id,
+                    'admin_id' => $admin['id'], 
                     'status' => 'active'
                 ]);
                 

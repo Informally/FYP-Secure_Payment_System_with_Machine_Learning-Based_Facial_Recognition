@@ -1,5 +1,5 @@
 <?php
-// customer_side/payment/payment_pin.php - PIN Entry for Payment Authorization
+// customer_side/payment/payment_pin.php - No Account Locking Version
 require_once '../config.php';
 require_once '../encrypt.php';
 
@@ -12,16 +12,105 @@ if (!isset($_SESSION['gateway_payment'])) {
     exit();
 }
 
-// Check if face verification was completed
+// ✅ ENHANCED FLOW PROTECTION
+// Check if face verification was completed AND is still valid
 if (!isset($_SESSION['payment_user']) || !$_SESSION['payment_user']['face_verified']) {
     header("Location: payment_scan.php");
     exit();
 }
 
+// ✅ Check if face verification is too old (30 minutes timeout)
+$face_verified_at = $_SESSION['payment_user']['face_verified_at'] ?? 0;
+if ((time() - $face_verified_at) > 1800) { // 30 minutes
+    // Face verification expired - clear session and restart
+    unset($_SESSION['payment_user']);
+    SecurityUtils::logSecurityEvent($_SESSION['payment_user']['user_id'] ?? 'unknown', 'payment_face_expired', 'failure', [
+        'expired_duration' => time() - $face_verified_at
+    ]);
+    header("Location: payment_scan.php");
+    exit();
+}
+
+// ✅ Check if user is trying to access PIN step without completing face verification
+if ($_SESSION['payment_user']['payment_step'] !== 'pin_entry') {
+    header("Location: payment_scan.php");
+    exit();
+}
+
+// ✅ Prevent PIN step from being accessed after completion
+if (isset($_SESSION['payment_user']['pin_verified']) && $_SESSION['payment_user']['pin_verified']) {
+    // PIN already verified - redirect to payment processing
+    header("Location: payment_process.php");
+    exit();
+}
+
 $payment_data = $_SESSION['gateway_payment'];
+
+// Get merchant main URL for cancel redirects
+$merchant_main_url = '';
+if (isset($_SESSION['gateway_payment']['merchant_id'])) {
+    try {
+        $conn = dbConnect();
+        $stmt = $conn->prepare("SELECT return_url FROM merchants WHERE merchant_id = ?");
+        $stmt->bind_param("s", $_SESSION['gateway_payment']['merchant_id']);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $merchant = $result->fetch_assoc();
+        $merchant_main_url = $merchant['return_url'] ?? '';
+        $stmt->close();
+        $conn->close();
+    } catch (Exception $e) {
+        error_log("Error getting merchant URL: " . $e->getMessage());
+    }
+}
+// Add to payment_data for JavaScript access
+$payment_data['merchant_main_url'] = $merchant_main_url;
+
 $payment_user = $_SESSION['payment_user'];
 $error = "";
 $success = "";
+
+// ✅ INITIALIZE PIN ATTEMPTS
+if (!isset($_SESSION['payment_pin_attempts'])) {
+    $_SESSION['payment_pin_attempts'] = 0;
+}
+
+$attempts_used = $_SESSION['payment_pin_attempts'];
+$attempts_remaining = 5 - $attempts_used;
+
+// ✅ NEW: Function to handle payment failure redirects
+function redirectToPaymentFailed($payment_data, $error_message) {
+    // Clear payment session
+    unset($_SESSION['payment_user']);
+    unset($_SESSION['payment_pin_attempts']);
+    
+    // Store the redirect data in session for the failed page
+    $_SESSION['payment_redirect_data'] = [
+        'status' => 'failed',
+        'order_id' => $payment_data['order_id'],
+        'amount' => $payment_data['amount'],
+        'currency' => $payment_data['currency'],
+        'merchant_name' => $payment_data['merchant_name'],
+        'merchant_url' => $payment_data['merchant_main_url'] ?? '',
+        'error' => $error_message
+    ];
+    
+    // Simple PHP redirect - much more reliable
+    header("Location: payment_failed.php");
+    exit();
+}
+
+// ✅ Check if max attempts already reached (before any POST processing)
+if ($attempts_used >= 5) {
+    SecurityUtils::logSecurityEvent($payment_user['user_id'], 'payment_pin_max_attempts_reached', 'failure', [
+        'payment_amount' => $payment_data['amount'],
+        'merchant_id' => $payment_data['merchant_id'],
+        'order_id' => $payment_data['order_id'],
+        'attempts_used' => $attempts_used
+    ]);
+    
+    redirectToPaymentFailed($payment_data, 'Payment cancelled due to too many incorrect PIN attempts');
+}
 
 // Handle PIN verification
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -32,74 +121,113 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if (!validateCSRFToken($_POST['csrf_token'] ?? '')) {
             $error = "Invalid request. Please try again.";
         } else {
-            $entered_pin = $_POST['pin'] ?? '';
-            
-            if (empty($entered_pin)) {
-                $error = "Please enter your PIN.";
-            } elseif (strlen($entered_pin) !== 6 || !ctype_digit($entered_pin)) {
-                $error = "PIN must be exactly 6 digits.";
-                SecurityUtils::logSecurityEvent($payment_user['user_id'], 'payment_invalid_pin_format', 'failure', [
-                    'payment_amount' => $payment_data['amount'],
-                    'merchant_id' => $payment_data['merchant_id'],
-                    'order_id' => $payment_data['order_id']
-                ]);
-            } else {
-                try {
-                    $conn = dbConnect();
-                    
-                    // Get user's PIN and check account status - Using your existing table structure
-                    $stmt = $conn->prepare("
-                        SELECT pin_code, account_status
-                        FROM users 
-                        WHERE id = ? AND account_status = 'active'
-                    ");
-                    $stmt->bind_param("i", $payment_user['id']);
-                    $stmt->execute();
-                    $result = $stmt->get_result();
-                    $user_data = $result->fetch_assoc();
-                    $stmt->close();
-                    
-                    if (!$user_data) {
-                        $error = "Account not found or not active.";
-                        SecurityUtils::logSecurityEvent($payment_user['user_id'], 'payment_pin_account_error', 'failure');
-                    } else {
-                        // Simple PIN verification - direct comparison with pin_code field
-                        if (password_verify($entered_pin, $user_data['pin_code'])) {
-                            // PIN correct - proceed with payment
-                            $_SESSION['payment_user']['pin_verified'] = true;
-                            $_SESSION['payment_user']['pin_verified_at'] = time();
-                            
-                            SecurityUtils::logSecurityEvent($payment_user['user_id'], 'payment_pin_success', 'success', [
-                                'payment_amount' => $payment_data['amount'],
-                                'merchant_id' => $payment_data['merchant_id'],
-                                'order_id' => $payment_data['order_id'],
-                                'face_similarity' => $payment_user['face_similarity'],
-                                'liveness_score' => $payment_user['liveness_score']
-                            ]);
-                            
-                            $success = "PIN verified! Processing payment...";
-                            
-                            // JavaScript will handle redirect to payment processing
+            // ✅ Check if face verification is still valid
+            if ((time() - $face_verified_at) > 1800) { // 30 minutes
+                $error = "Face verification expired. Please restart the payment process.";
+                unset($_SESSION['payment_user']);
+                unset($_SESSION['payment_pin_attempts']);
+                echo "<script>
+                    setTimeout(() => {
+                        window.location.href = 'payment_scan.php';
+                    }, 3000);
+                </script>";
+                // Don't exit here, let the page render with the error
+            } 
+            else {
+                $entered_pin = $_POST['pin'] ?? '';
+                
+                if (empty($entered_pin)) {
+                    $error = "Please enter your PIN.";
+                } elseif (strlen($entered_pin) !== 6 || !ctype_digit($entered_pin)) {
+                    $error = "PIN must be exactly 6 digits.";
+                    SecurityUtils::logSecurityEvent($payment_user['user_id'], 'payment_invalid_pin_format', 'failure', [
+                        'payment_amount' => $payment_data['amount'],
+                        'merchant_id' => $payment_data['merchant_id'],
+                        'order_id' => $payment_data['order_id']
+                    ]);
+                } else {
+                    try {
+                        $conn = dbConnect();
+                        
+                        // ✅ Get PIN and account status
+                        $stmt = $conn->prepare("
+                            SELECT pin_code, account_status
+                            FROM users 
+                            WHERE id = ? AND account_status = 'active'
+                        ");
+                        $stmt->bind_param("i", $payment_user['id']);
+                        $stmt->execute();
+                        $result = $stmt->get_result();
+                        $user_data = $result->fetch_assoc();
+                        $stmt->close();
+                        
+                        if (!$user_data) {
+                            $error = "Account not found or not active.";
+                            SecurityUtils::logSecurityEvent($payment_user['user_id'], 'payment_pin_account_error', 'failure');
+                            $conn->close();
+                            redirectToPaymentFailed($payment_data, 'Account not found or not active');
                         } else {
-                            // PIN incorrect
-                            $error = "Incorrect PIN. Please try again.";
-                            
-                            SecurityUtils::logSecurityEvent($payment_user['user_id'], 'payment_pin_failed', 'failure', [
-                                'payment_amount' => $payment_data['amount'],
-                                'merchant_id' => $payment_data['merchant_id']
-                            ]);
+                            // ✅ Verify PIN
+                            if (password_verify($entered_pin, $user_data['pin_code'])) {
+                                // ✅ SUCCESS - Clear PIN attempts and proceed
+                                unset($_SESSION['payment_pin_attempts']);
+                                
+                                // ✅ UPDATE SESSION WITH FLOW PROTECTION
+                                $_SESSION['payment_user']['pin_verified'] = true;
+                                $_SESSION['payment_user']['pin_verified_at'] = time();
+                                $_SESSION['payment_user']['payment_step'] = 'processing';
+                                
+                                SecurityUtils::logSecurityEvent($payment_user['user_id'], 'payment_pin_success', 'success', [
+                                    'payment_amount' => $payment_data['amount'],
+                                    'merchant_id' => $payment_data['merchant_id'],
+                                    'order_id' => $payment_data['order_id'],
+                                    'attempts_used' => $attempts_used + 1
+                                ]);
+                                
+                                $success = "PIN verified! Processing payment...";
+                            } else {
+                                // ❌ PIN FAILED - Increment attempts
+                                $_SESSION['payment_pin_attempts'] = $attempts_used + 1;
+                                $new_attempts_used = $_SESSION['payment_pin_attempts'];
+                                $new_attempts_remaining = 5 - $new_attempts_used;
+                                
+                                // Update display variables
+                                $attempts_used = $new_attempts_used;
+                                $attempts_remaining = $new_attempts_remaining;
+                                
+                                SecurityUtils::logSecurityEvent($payment_user['user_id'], 'payment_pin_failed', 'failure', [
+                                    'payment_amount' => $payment_data['amount'],
+                                    'merchant_id' => $payment_data['merchant_id'],
+                                    'order_id' => $payment_data['order_id'],
+                                    'attempts_used' => $new_attempts_used,
+                                    'attempts_remaining' => $new_attempts_remaining
+                                ]);
+                                
+                                // ✅ Check if this was the final attempt
+                                if ($new_attempts_remaining <= 0) {
+                                    $conn->close();
+                                    redirectToPaymentFailed($payment_data, 'Maximum PIN attempts exceeded for this payment');
+                                } else {
+                                    $error = "Incorrect PIN. $new_attempts_remaining attempts remaining for this payment.";
+                                }
+                            }
                         }
+                        
+                        $conn->close();
+                        
+                    } catch (Exception $e) {
+                        error_log("Payment PIN verification error: " . $e->getMessage());
+                        redirectToPaymentFailed($payment_data, 'Payment authorization failed due to system error');
                     }
-                    
-                    $conn->close();
-                    
-                } catch (Exception $e) {
-                    error_log("Payment PIN verification error: " . $e->getMessage());
-                    $error = "Payment authorization failed due to system error.";
                 }
             }
         }
     }
+}
+
+// ✅ Final check: if attempts remaining is 0 or less, redirect
+if ($attempts_remaining <= 0) {
+    redirectToPaymentFailed($payment_data, 'Payment cancelled due to too many incorrect PIN attempts');
 }
 
 $csrf_token = generateCSRFToken();
@@ -115,8 +243,6 @@ $csrf_token = generateCSRFToken();
     <style>
         :root {
             --primary: #667eea;
-            --primary-light: #e3f2fd;
-            --primary-dark: #5a67d8;
             --success: #38a169;
             --warning: #ed8936;
             --error: #e53e3e;
@@ -125,7 +251,6 @@ $csrf_token = generateCSRFToken();
             --text-light: #718096;
             --border: #e2e8f0;
             --bg-light: #f7fafc;
-            --shadow: rgba(0,0,0,0.1);
         }
         
         * {
@@ -158,18 +283,6 @@ $csrf_token = generateCSRFToken();
             box-shadow: 0 20px 40px rgba(0,0,0,0.1);
             text-align: center;
             animation: fadeUp 0.6s ease-out;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .pin-container::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, var(--success), #667eea);
         }
         
         @keyframes fadeUp {
@@ -190,12 +303,6 @@ $csrf_token = generateCSRFToken();
             align-items: center;
             justify-content: center;
             margin: 0 auto 20px;
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.05); }
         }
         
         .pin-logo i {
@@ -216,7 +323,6 @@ $csrf_token = generateCSRFToken();
             margin-bottom: 30px;
         }
         
-        /* User Info Section */
         .user-info {
             background: var(--bg-light);
             border-radius: 15px;
@@ -230,7 +336,6 @@ $csrf_token = generateCSRFToken();
             align-items: center;
             justify-content: center;
             gap: 10px;
-            margin-bottom: 15px;
         }
         
         .status-icon {
@@ -245,33 +350,6 @@ $csrf_token = generateCSRFToken();
             font-size: 12px;
         }
         
-        .user-details {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            text-align: left;
-        }
-        
-        .detail-item {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .detail-label {
-            font-size: 12px;
-            color: var(--text-light);
-            text-transform: uppercase;
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        
-        .detail-value {
-            font-size: 14px;
-            color: var(--text-dark);
-            font-weight: 600;
-        }
-        
-        /* Payment Summary */
         .payment-summary {
             background: #fff9f0;
             border: 2px solid #fbd38d;
@@ -293,7 +371,29 @@ $csrf_token = generateCSRFToken();
             font-weight: 600;
         }
         
-        /* PIN Input Section */
+        .attempts-indicator {
+            background: #fff5f5;
+            border: 2px solid #fed7d7;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .attempts-indicator.warning {
+            background: #fffbeb;
+            border-color: #fbd38d;
+        }
+        
+        .attempts-indicator.normal {
+            background: #f0fff4;
+            border-color: #c6f6d5;
+        }
+        
+        .attempts-text {
+            font-weight: 600;
+            color: var(--text-dark);
+        }
+        
         .pin-section {
             margin: 30px 0;
         }
@@ -303,10 +403,6 @@ $csrf_token = generateCSRFToken();
             color: var(--text-dark);
             font-weight: 600;
             margin-bottom: 25px;
-        }
-        
-        .pin-input-container {
-            margin: 25px 0;
         }
         
         .pin-inputs {
@@ -329,19 +425,12 @@ $csrf_token = generateCSRFToken();
             outline: none;
         }
         
-        .pin-digit:focus {
-            border-color: var(--success);
-            box-shadow: 0 0 0 3px rgba(56, 161, 105, 0.1);
-            transform: scale(1.05);
-        }
-        
         .pin-digit.filled {
             background: var(--success);
             color: white;
             border-color: var(--success);
         }
         
-        /* Virtual Keypad */
         .keypad {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -386,7 +475,6 @@ $csrf_token = generateCSRFToken();
             background: var(--error);
         }
         
-        /* Messages */
         .message {
             padding: 15px 18px;
             border-radius: 10px;
@@ -410,7 +498,6 @@ $csrf_token = generateCSRFToken();
             border: 1px solid #fed7d7;
         }
         
-        /* Controls */
         .controls {
             display: flex;
             gap: 15px;
@@ -451,17 +538,6 @@ $csrf_token = generateCSRFToken();
             transform: none;
         }
         
-        .btn-secondary {
-            background: white;
-            color: var(--text-medium);
-            border: 2px solid var(--border);
-        }
-        
-        .btn-secondary:hover {
-            background: var(--bg-light);
-            border-color: var(--primary);
-        }
-        
         .btn-warning {
             background: #95a5a6;
             color: white;
@@ -473,7 +549,6 @@ $csrf_token = generateCSRFToken();
             border-color: #7f8c8d;
         }
         
-        /* Security Notice */
         .security-notice {
             background: #f0f8ff;
             border: 1px solid #bfdbfe;
@@ -490,30 +565,6 @@ $csrf_token = generateCSRFToken();
             margin-right: 8px;
         }
         
-        /* Loading State */
-        .loading {
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            gap: 15px;
-            margin: 20px 0;
-        }
-        
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid #e2e8f0;
-            border-top: 4px solid var(--success);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        /* Responsive Design */
         @media (max-width: 768px) {
             .container {
                 padding: 15px;
@@ -521,11 +572,6 @@ $csrf_token = generateCSRFToken();
             
             .pin-container {
                 padding: 25px 20px;
-            }
-            
-            .user-details {
-                grid-template-columns: 1fr;
-                gap: 10px;
             }
             
             .pin-digit {
@@ -568,7 +614,6 @@ $csrf_token = generateCSRFToken();
                 <p class="subtitle">Complete your payment authorization with your 6-digit PIN</p>
             </div>
             
-            <!-- User Verification Status -->
             <div class="user-info">
                 <div class="verification-status">
                     <div class="status-icon">
@@ -576,19 +621,8 @@ $csrf_token = generateCSRFToken();
                     </div>
                     <span style="color: var(--success); font-weight: 600;">Face Verified: <?= htmlspecialchars($payment_user['full_name']) ?></span>
                 </div>
-                <!-- <div class="user-details">
-                    <div class="detail-item">
-                        <div class="detail-label">Username</div>
-                        <div class="detail-value"><?= htmlspecialchars($payment_user['username']) ?></div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Similarity Score</div>
-                        <div class="detail-value"><?= number_format($payment_user['face_similarity'] * 100, 1) ?>%</div>
-                    </div>
-                </div> -->
             </div>
             
-            <!-- Payment Summary -->
             <div class="payment-summary">
                 <div class="payment-amount">
                     <?= $payment_data['currency'] ?> <?= number_format($payment_data['amount'], 2) ?>
@@ -603,6 +637,14 @@ $csrf_token = generateCSRFToken();
                     <i class="fas fa-exclamation-circle"></i>
                     <?= htmlspecialchars($error) ?>
                 </div>
+            <?php else: ?>
+                <!-- ✅ Show attempts remaining only when no error -->
+                <div class="attempts-indicator <?= $attempts_remaining <= 2 ? 'warning' : ($attempts_remaining <= 1 ? '' : 'normal') ?>">
+                    <div class="attempts-text">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <?= $attempts_remaining ?> attempts remaining for this payment
+                    </div>
+                </div>
             <?php endif; ?>
             
             <?php if ($success): ?>
@@ -612,7 +654,6 @@ $csrf_token = generateCSRFToken();
                 </div>
             <?php endif; ?>
             
-            <!-- PIN Input Section -->
             <div class="pin-section">
                 <div class="pin-instruction">
                     Enter your 6-digit security PIN
@@ -623,20 +664,17 @@ $csrf_token = generateCSRFToken();
                     <input type="hidden" name="action" value="verify_pin">
                     <input type="hidden" name="pin" id="hiddenPin">
                     
-                    <div class="pin-input-container">
-                        <div class="pin-inputs" id="pinInputs">
-                            <input type="password" class="pin-digit" maxlength="1" data-index="0" readonly>
-                            <input type="password" class="pin-digit" maxlength="1" data-index="1" readonly>
-                            <input type="password" class="pin-digit" maxlength="1" data-index="2" readonly>
-                            <input type="password" class="pin-digit" maxlength="1" data-index="3" readonly>
-                            <input type="password" class="pin-digit" maxlength="1" data-index="4" readonly>
-                            <input type="password" class="pin-digit" maxlength="1" data-index="5" readonly>
-                        </div>
+                    <div class="pin-inputs" id="pinInputs">
+                        <input type="password" class="pin-digit" maxlength="1" data-index="0" readonly>
+                        <input type="password" class="pin-digit" maxlength="1" data-index="1" readonly>
+                        <input type="password" class="pin-digit" maxlength="1" data-index="2" readonly>
+                        <input type="password" class="pin-digit" maxlength="1" data-index="3" readonly>
+                        <input type="password" class="pin-digit" maxlength="1" data-index="4" readonly>
+                        <input type="password" class="pin-digit" maxlength="1" data-index="5" readonly>
                     </div>
                 </form>
             </div>
             
-            <!-- Virtual Keypad -->
             <div class="keypad" id="keypad">
                 <button class="keypad-btn" data-digit="1">1</button>
                 <button class="keypad-btn" data-digit="2">2</button>
@@ -656,35 +694,21 @@ $csrf_token = generateCSRFToken();
                 </button>
             </div>
             
-            <!-- Loading State -->
-            <div class="loading" id="loading">
-                <div class="spinner"></div>
-                <div>Processing payment...</div>
-            </div>
-            
-            <!-- Security Notice -->
-            <div class="security-notice">
-                <i class="fas fa-info-circle"></i>
-                <strong>Security Notice:</strong> Your PIN is verified securely for payment authorization. 
-                Please ensure you enter the correct PIN associated with your account.
-            </div>
-            
-            <!-- Controls -->
             <div class="controls">
                 <button class="btn btn-success" id="submitBtn" disabled>
                     <i class="fas fa-lock"></i>
                     Authorize Payment
                 </button>
                 
-                <a href="payment_scan.php" class="btn btn-secondary">
-                    <i class="fas fa-arrow-left"></i>
-                    Back to Face Scan
-                </a>
-                
                 <a href="javascript:void(0)" class="btn btn-warning" onclick="cancelPayment()">
                     <i class="fas fa-times"></i>
                     Cancel Payment
                 </a>
+            </div>
+            
+            <div class="security-notice">
+                <i class="fas fa-info-circle"></i>
+                <strong>Payment Security:</strong> You have <?= $attempts_remaining ?> attempts for this payment. After 5 failed attempts, the payment will be cancelled for security.
             </div>
         </div>
     </div>
@@ -693,18 +717,29 @@ $csrf_token = generateCSRFToken();
         let currentPin = '';
         const maxPinLength = 6;
         
+        // ✅ FLOW PROTECTION - Prevent browser back button abuse
+        window.history.pushState(null, "", window.location.href);
+        window.onpopstate = function() {
+            window.history.pushState(null, "", window.location.href);
+        };
+        
         // Initialize PIN input
         document.addEventListener('DOMContentLoaded', function() {
             setupKeypad();
-            document.getElementById('submitBtn').addEventListener('click', submitPin);
+            
+            const submitBtn = document.getElementById('submitBtn');
+            if (submitBtn) {
+                submitBtn.addEventListener('click', submitPin);
+            }
         });
         
         // Setup virtual keypad
         function setupKeypad() {
             const keypadBtns = document.querySelectorAll('.keypad-btn');
             
-            keypadBtns.forEach(btn => {
-                btn.addEventListener('click', function() {
+            keypadBtns.forEach((btn, index) => {
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
                     const digit = this.getAttribute('data-digit');
                     const action = this.getAttribute('data-action');
                     
@@ -729,8 +764,10 @@ $csrf_token = generateCSRFToken();
                 // Add visual feedback
                 const currentIndex = currentPin.length - 1;
                 const pinInput = document.querySelector(`.pin-digit[data-index="${currentIndex}"]`);
-                pinInput.value = '•';
-                pinInput.classList.add('filled');
+                if (pinInput) {
+                    pinInput.value = '•';
+                    pinInput.classList.add('filled');
+                }
             }
         }
         
@@ -739,8 +776,10 @@ $csrf_token = generateCSRFToken();
             if (currentPin.length > 0) {
                 const lastIndex = currentPin.length - 1;
                 const pinInput = document.querySelector(`.pin-digit[data-index="${lastIndex}"]`);
-                pinInput.value = '';
-                pinInput.classList.remove('filled');
+                if (pinInput) {
+                    pinInput.value = '';
+                    pinInput.classList.remove('filled');
+                }
                 
                 currentPin = currentPin.slice(0, -1);
                 updateSubmitButton();
@@ -775,27 +814,24 @@ $csrf_token = generateCSRFToken();
         // Update submit button state
         function updateSubmitButton() {
             const submitBtn = document.getElementById('submitBtn');
-            submitBtn.disabled = currentPin.length !== maxPinLength;
+            if (submitBtn) {
+                const isEnabled = currentPin.length === maxPinLength;
+                submitBtn.disabled = !isEnabled;
+            }
         }
         
         // Submit PIN
         function submitPin() {
             if (currentPin.length === maxPinLength) {
-                // Show loading state
-                document.getElementById('loading').style.display = 'flex';
-                document.getElementById('submitBtn').disabled = true;
-                
-                // Set PIN in hidden field and submit
+                // Set PIN in hidden field
                 document.getElementById('hiddenPin').value = currentPin;
                 
-                // Clear PIN from memory
+                // Clear PIN from memory for security
                 currentPin = '';
                 clearPin();
                 
                 // Submit form
-                setTimeout(() => {
-                    document.getElementById('pinForm').submit();
-                }, 500);
+                document.getElementById('pinForm').submit();
             }
         }
         
@@ -819,7 +855,41 @@ $csrf_token = generateCSRFToken();
         // Cancel payment function
         function cancelPayment() {
             if (confirm('Are you sure you want to cancel this payment?')) {
-                window.location.href = '<?= htmlspecialchars($payment_data['cancel_url']) ?>?status=cancelled&order_id=<?= urlencode($payment_data['order_id']) ?>';
+                // Clear PIN from memory for security
+                currentPin = '';
+                clearPin();
+                
+                // Clear only client-side UI data
+                if (typeof(Storage) !== "undefined") {
+                    sessionStorage.removeItem('pin_entered');
+                    sessionStorage.removeItem('pin_attempts');
+                }
+                
+                // Use POST form to redirect to payment_failed.php
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = 'payment_failed.php';
+                
+                const fields = {
+                    'status': 'cancelled',
+                    'order_id': '<?= htmlspecialchars($payment_data['order_id']) ?>',
+                    'amount': '<?= $payment_data['amount'] ?>',
+                    'currency': '<?= htmlspecialchars($payment_data['currency']) ?>',
+                    'merchant_name': '<?= htmlspecialchars($payment_data['merchant_name']) ?>',
+                    'merchant_url': '<?= htmlspecialchars($payment_data['merchant_main_url'] ?? '') ?>',
+                    'error': 'Payment cancelled by user during PIN entry'
+                };
+                
+                Object.keys(fields).forEach(key => {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = key;
+                    input.value = fields[key];
+                    form.appendChild(input);
+                });
+                
+                document.body.appendChild(form);
+                form.submit();
             }
         }
         
@@ -830,26 +900,10 @@ $csrf_token = generateCSRFToken();
         }, 3000);
         <?php endif; ?>
         
-        // Prevent form submission on Enter key in PIN inputs
-        document.querySelectorAll('.pin-digit').forEach(input => {
-            input.addEventListener('keydown', function(e) {
-                e.preventDefault();
-            });
-        });
-        
         // Security: Clear PIN from memory on page unload
         window.addEventListener('beforeunload', function() {
             currentPin = '';
             clearPin();
-        });
-        
-        // Auto-focus management (for accessibility)
-        window.addEventListener('load', function() {
-            // Focus first empty PIN input
-            const firstEmpty = document.querySelector('.pin-digit:not(.filled)');
-            if (firstEmpty) {
-                firstEmpty.focus();
-            }
         });
     </script>
 </body>

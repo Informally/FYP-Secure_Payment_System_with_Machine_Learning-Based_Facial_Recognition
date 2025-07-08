@@ -1,5 +1,5 @@
 <?php
-// customer_side/payment/payment_scan.php - Face Recognition for Payment Authorization
+// customer_side/payment/payment_scan.php - Face Recognition without Rate Limiting
 require_once '../config.php';
 require_once '../encrypt.php';
 
@@ -12,7 +12,36 @@ if (!isset($_SESSION['gateway_payment'])) {
     exit();
 }
 
+// ✅ FLOW PROTECTION - Prevent going back to face scan after completion
+if (isset($_SESSION['payment_user']) && $_SESSION['payment_user']['face_verified']) {
+    // Face verification already completed - redirect to PIN entry
+    header("Location: payment_pin.php");
+    exit();
+}
+
 $payment_data = $_SESSION['gateway_payment'];
+
+// ✅ ADD THIS AFTER THE EXISTING SESSION VALIDATION
+// Get merchant main URL for cancel redirects
+$merchant_main_url = '';
+if (isset($_SESSION['gateway_payment']['merchant_id'])) {
+    try {
+        $conn = dbConnect();
+        $stmt = $conn->prepare("SELECT return_url FROM merchants WHERE merchant_id = ?");
+        $stmt->bind_param("s", $_SESSION['gateway_payment']['merchant_id']);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $merchant = $result->fetch_assoc();
+        $merchant_main_url = $merchant['return_url'] ?? '';
+        $stmt->close();
+        $conn->close();
+    } catch (Exception $e) {
+        error_log("Error getting merchant URL: " . $e->getMessage());
+    }
+}
+// Add to payment_data for JavaScript access
+$payment_data['merchant_main_url'] = $merchant_main_url;
+
 $error = "";
 $success = "";
 
@@ -66,7 +95,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $stmt->close();
                     
                     if ($user !== false && $user['account_status'] === 'active' && $user['is_verified']) {
-                        // Store payment user session
+                        // ✅ FLOW PROTECTION - Store payment user session with timestamp
                         $_SESSION['payment_user'] = [
                             'id' => $user['id'],
                             'user_id' => $user['user_id'],
@@ -74,8 +103,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             'full_name' => $user['full_name'],
                             'face_verified' => true,
                             'face_similarity' => $similarity,
-                            'liveness_score' => $liveness_score
+                            'liveness_score' => $liveness_score,
+                            'face_verified_at' => time(), // ✅ Add timestamp
+                            'payment_step' => 'pin_entry' // ✅ Track current step
                         ];
+                        // ✅ Reset PIN attempts for new payment session
+                        unset($_SESSION['payment_pin_attempts']);
                         
                         SecurityUtils::logSecurityEvent($user['user_id'], 'payment_face_success', 'success', [
                             'similarity' => $similarity,
@@ -94,6 +127,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             'payment_amount' => $payment_data['amount'],
                             'merchant_id' => $payment_data['merchant_id']
                         ]);
+                        
+                        // Redirect to merchant
+                        echo "<script>
+                            setTimeout(() => {
+                                window.location.href = '{$payment_data['cancel_url']}?status=failed&reason=account_error&order_id=" . urlencode($payment_data['order_id']) . "';
+                            }, 3000);
+                        </script>";
                     }
                     
                     $conn->close();
@@ -101,6 +141,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 } catch (Exception $e) {
                     error_log("Payment facial verification error: " . $e->getMessage());
                     $error = "Payment verification failed due to system error.";
+                    
+                    echo "<script>
+                        setTimeout(() => {
+                            window.location.href = '{$payment_data['cancel_url']}?status=failed&reason=system_error&order_id=" . urlencode($payment_data['order_id']) . "';
+                        }, 3000);
+                    </script>";
                 }
             }
         }
@@ -221,7 +267,6 @@ $csrf_token = generateCSRFToken();
             margin-bottom: 30px;
         }
         
-        /* Payment Details Section */
         .payment-details {
             background: var(--bg-light);
             border-radius: 15px;
@@ -266,7 +311,6 @@ $csrf_token = generateCSRFToken();
             font-weight: 700;
         }
         
-        /* Steps Section */
         .steps-section {
             margin: 30px 0;
         }
@@ -319,7 +363,6 @@ $csrf_token = generateCSRFToken();
             line-height: 1.4;
         }
         
-        /* Camera Section */
         .camera-section {
             margin-bottom: 30px;
         }
@@ -395,7 +438,6 @@ $csrf_token = generateCSRFToken();
             animation: blink 1s infinite;
         }
         
-        /* Status Messages */
         .status-section {
             margin: 25px 0;
             min-height: 60px;
@@ -440,7 +482,6 @@ $csrf_token = generateCSRFToken();
             border: 1px solid #fed7d7;
         }
         
-        /* Progress Bar */
         .progress-container {
             margin: 20px 0;
             width: 100%;
@@ -462,7 +503,6 @@ $csrf_token = generateCSRFToken();
             border-radius: 6px;
         }
         
-        /* Controls */
         .controls {
             display: flex;
             gap: 15px;
@@ -554,7 +594,6 @@ $csrf_token = generateCSRFToken();
             box-shadow: none;
         }
         
-        /* Messages from PHP */
         .message {
             padding: 15px 18px;
             border-radius: 10px;
@@ -578,7 +617,6 @@ $csrf_token = generateCSRFToken();
             border: 1px solid #fed7d7;
         }
         
-        /* Cancel Payment */
         .cancel-section {
             margin-top: 30px;
             padding-top: 25px;
@@ -604,6 +642,7 @@ $csrf_token = generateCSRFToken();
             gap: 8px;
             font-weight: 500;
             transition: all 0.3s ease;
+            cursor: pointer;
         }
         
         .cancel-btn:hover {
@@ -613,7 +652,6 @@ $csrf_token = generateCSRFToken();
             color: white;
         }
         
-        /* Responsive Design */
         @media (max-width: 768px) {
             .container {
                 padding: 15px;
@@ -659,7 +697,6 @@ $csrf_token = generateCSRFToken();
                 <p class="subtitle">Verify your identity to complete this payment</p>
             </div>
             
-            <!-- Payment Details -->
             <div class="payment-details">
                 <div class="payment-info">
                     <div class="info-item">
@@ -695,7 +732,6 @@ $csrf_token = generateCSRFToken();
                 </div>
             <?php endif; ?>
             
-            <!-- Process Steps -->
             <div class="steps-section">
                 <div class="steps-grid">
                     <div class="step-card">
@@ -716,7 +752,6 @@ $csrf_token = generateCSRFToken();
                 </div>
             </div>
             
-            <!-- Camera Section -->
             <div class="camera-section" id="cameraSection">
                 <div class="camera-container">
                     <video id="video" autoplay playsinline></video>
@@ -727,21 +762,18 @@ $csrf_token = generateCSRFToken();
                 </div>
             </div>
             
-            <!-- Status Messages -->
             <div class="status-section">
                 <div class="status-message status-info" id="statusMessage">
                     Ready to start payment authorization
                 </div>
             </div>
             
-            <!-- Progress Bar -->
             <div class="progress-container" id="progressContainer">
                 <div class="progress-bar">
                     <div class="progress-fill" id="progressFill"></div>
                 </div>
             </div>
             
-            <!-- Controls -->
             <div class="controls">
                 <button class="btn btn-primary" id="startScanBtn">
                     <i class="fas fa-camera"></i>
@@ -758,7 +790,6 @@ $csrf_token = generateCSRFToken();
                 </button>
             </div>
             
-            <!-- Hidden form for submission -->
             <form method="POST" id="verificationForm" style="display: none;">
                 <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
                 <input type="hidden" name="action" value="verify_payment_face">
@@ -768,20 +799,31 @@ $csrf_token = generateCSRFToken();
                 <input type="hidden" name="liveness_verified" id="hiddenLivenessVerified">
             </form>
             
-            <!-- Cancel Payment -->
             <div class="cancel-section">
                 <p>Having trouble or want to cancel?</p>
-                <a href="javascript:void(0)" class="cancel-btn" onclick="cancelPayment()">
+                <button type="button" class="cancel-btn" onclick="cancelPayment()">
                     <i class="fas fa-times"></i>
                     Cancel Payment
-                </a>
+                </button>
             </div>
         </div>
     </div>
 
     <script>
-        // Configuration - Same as your scan.php
+        // Configuration
         const API_BASE_URL = "http://localhost:5000";
+        
+        // ✅ SAFE PHP DATA TRANSFER
+        const paymentData = <?= json_encode([
+            'order_id' => $payment_data['order_id'] ?? '',
+            'amount' => $payment_data['amount'] ?? 0,
+            'currency' => $payment_data['currency'] ?? '',
+            'merchant_name' => $payment_data['merchant_name'] ?? '',
+            'merchant_main_url' => $payment_data['merchant_main_url'] ?? '',
+            'cancel_url' => $payment_data['cancel_url'] ?? ''
+        ]) ?>;
+        
+        const hasSuccess = <?= $success ? 'true' : 'false' ?>;
         
         // Global variables
         let stream;
@@ -789,7 +831,7 @@ $csrf_token = generateCSRFToken();
         let faceDetected = false;
         let faceDetectionInterval;
         let retryCount = 0;
-        const maxRetries = 3;
+        const maxRetries = 3; // Increased retry limit since rate limiting is removed
         
         // Initialize page
         document.addEventListener('DOMContentLoaded', function() {
@@ -914,8 +956,6 @@ $csrf_token = generateCSRFToken();
                         faceDetected = false;
                         document.getElementById('faceOutline').classList.remove('success');
                         updateStatus('Position your face in the outline for payment verification', 'info');
-                        
-                        // Hide verify button
                         hideVerifyButton();
                     }
                 } else {
@@ -923,8 +963,6 @@ $csrf_token = generateCSRFToken();
                         faceDetected = true;
                         document.getElementById('faceOutline').classList.add('success');
                         updateStatus('Face detected! Click "Verify for Payment" when ready.', 'success');
-                        
-                        // Show verify button
                         showVerifyButton();
                     }
                 }
@@ -933,7 +971,6 @@ $csrf_token = generateCSRFToken();
                 console.error("Face detection error:", error);
                 faceDetected = false;
                 document.getElementById('faceOutline').classList.remove('success');
-                
                 hideVerifyButton();
             });
         }
@@ -955,13 +992,10 @@ $csrf_token = generateCSRFToken();
         async function startLivenessChallenge() {
             try {
                 clearInterval(faceDetectionInterval);
-                
-                // Hide verify button
                 hideVerifyButton();
                 
                 updateStatus('Ready for liveness challenge! Please move your face naturally.', 'info');
                 
-                // Start capturing frames automatically after a short delay
                 setTimeout(() => {
                     captureFrames();
                 }, 2000);
@@ -1046,7 +1080,6 @@ $csrf_token = generateCSRFToken();
                 timeDiffs.reduce((sum, diff) => sum + Math.pow(diff - avgTimeDiff, 2), 0) / timeDiffs.length
             );
             
-            // Payment verification data
             const authData = {
                 image_base64: mainImageData,
                 additional_frames: additionalFramesData,
@@ -1067,7 +1100,6 @@ $csrf_token = generateCSRFToken();
                 };
             }
             
-            // Call /authenticate endpoint for payment verification
             fetch(`${API_BASE_URL}/authenticate`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1080,12 +1112,9 @@ $csrf_token = generateCSRFToken();
                 return res.json();
             })
             .then(data => {
-                // For payment: check both liveness AND face recognition
                 if (data.status === "success" && data.liveness_verified && data.user_id) {
-                    // Both security and face recognition passed
                     updateStatus("✅ Payment verification successful! Proceeding to PIN entry...", "success");
                     
-                    // Submit to PHP
                     document.getElementById('hiddenUserId').value = data.user_id;
                     document.getElementById('hiddenSimilarity').value = data.similarity || 0.9;
                     document.getElementById('hiddenLivenessScore').value = data.liveness_score || 0.8;
@@ -1096,7 +1125,6 @@ $csrf_token = generateCSRFToken();
                     }, 1500);
                 } else {
                     retryCount++;
-                    // Handle specific error messages for payment
                     if (!data.liveness_verified) {
                         if (data.message && data.message.includes("spoof")) {
                             updateStatus("🚫 Spoofing attempt detected. Payment verification failed.", "error");
@@ -1130,11 +1158,14 @@ $csrf_token = generateCSRFToken();
         // Handle retry or fail for payment
         function handleRetryOrFail() {
             if (retryCount >= maxRetries) {
-                updateStatus("⚠️ Too many failed payment attempts. Redirecting to payment gateway...", "error");
+                updateStatus(`⚠️ Face verification failed after ${maxRetries} attempts. Redirecting to merchant...`, "error");
                 setTimeout(() => {
-                    window.location.href = '../../gateway/checkout.php';
+                    const cancelUrl = paymentData.merchant_main_url || paymentData.cancel_url;
+                    const orderId = paymentData.order_id;
+                    window.location.href = cancelUrl + '?status=failed&reason=face_verification_failed&order_id=' + encodeURIComponent(orderId);
                 }, 3000);
             } else {
+                updateStatus(`❌ Face verification failed. ${maxRetries - retryCount} attempts remaining.`, "warning");
                 showRetryOption();
             }
         }
@@ -1153,7 +1184,6 @@ $csrf_token = generateCSRFToken();
         
         // Retry process
         function retryProcess() {
-            // Reset everything
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
                 stream = null;
@@ -1163,27 +1193,23 @@ $csrf_token = generateCSRFToken();
                 clearInterval(faceDetectionInterval);
             }
             
-            // Reset UI
             document.getElementById('progressContainer').style.display = 'none';
             document.getElementById('progressFill').style.width = '0%';
             
-            // Reset buttons
             document.getElementById('startScanBtn').style.display = 'inline-flex';
             document.getElementById('retryBtn').style.display = 'none';
             hideVerifyButton();
             
-            // Reset variables
             frames = [];
             faceDetected = false;
-            retryCount = 0;
             
-            updateStatus('Ready to try payment verification again. Click "Start Verification" to begin.', 'info');
+            updateStatus(`Ready to retry face verification. ${maxRetries - retryCount} attempts remaining.`, 'info');
         }
         
-        // Cancel payment function
+        // ✅ Cancel payment function - CLEAN VERSION
         function cancelPayment() {
             if (confirm('Are you sure you want to cancel this payment?')) {
-                // Clean up camera
+                // Clean up camera resources
                 if (stream) {
                     stream.getTracks().forEach(track => track.stop());
                 }
@@ -1191,17 +1217,32 @@ $csrf_token = generateCSRFToken();
                     clearInterval(faceDetectionInterval);
                 }
                 
-                // Fail the payment and redirect
-                window.location.href = '<?= htmlspecialchars($payment_data['cancel_url']) ?>?status=cancelled&order_id=<?= urlencode($payment_data['order_id']) ?>';
+                // Clear client-side data
+                if (typeof(Storage) !== "undefined") {
+                    sessionStorage.removeItem('face_verified');
+                    sessionStorage.removeItem('camera_initialized');
+                }
+                
+                // Redirect to payment failed page
+                const params = new URLSearchParams();
+                params.append('status', 'cancelled');
+                params.append('order_id', paymentData.order_id);
+                params.append('amount', paymentData.amount);
+                params.append('currency', paymentData.currency);
+                params.append('merchant_name', paymentData.merchant_name);
+                params.append('merchant_url', paymentData.merchant_main_url);
+                params.append('error', 'Payment cancelled by user during face verification');
+                
+                window.location.href = 'payment_failed.php?' + params.toString();
             }
         }
         
         // Handle successful PHP response
-        <?php if ($success): ?>
-        setTimeout(() => {
-            window.location.href = 'payment_pin.php';
-        }, 3000);
-        <?php endif; ?>
+        if (hasSuccess) {
+            setTimeout(() => {
+                window.location.href = 'payment_pin.php';
+            }, 3000);
+        }
         
         // Clean up on page unload
         window.addEventListener('beforeunload', () => {

@@ -13,7 +13,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     try {
         $conn = dbConnect();
-        $auth = getAdminAuth();
         
         if ($action === 'process_refund') {
             $transaction_id = intval($_POST['transaction_id']);
@@ -115,14 +114,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Commit transaction
                     $conn->commit();
                     
-                    // Log action
-                    $auth->logAuditAction($admin['id'], 'process_refund', 'transactions', $transaction_id, [
-                        'refund_amount' => $refund_amount,
-                        'reason' => $refund_reason,
-                        'old_balance' => $old_balance,
-                        'new_balance' => $new_balance,
-                        'original_transaction_id' => $transaction_id
-                    ]);
+                    // Log action using new security system
+                    if (function_exists('logAdminSecurityEvent')) {
+                        logAdminSecurityEvent($admin['username'], 'process_refund', 'success', [
+                            'transaction_id' => $transaction_id,
+                            'refund_amount' => $refund_amount,
+                            'reason' => $refund_reason,
+                            'old_balance' => $old_balance,
+                            'new_balance' => $new_balance,
+                            'admin_id' => $admin['id'],
+                            'user_id' => $transaction['user_id']
+                        ]);
+                    }
                     
                     $message = "Refund processed successfully! Amount RM " . number_format($refund_amount, 2) . " has been credited to user's wallet. New balance: RM " . number_format($new_balance, 2);
                     $message_type = 'success';
@@ -1010,16 +1013,6 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <!-- <div class="form-group">
-                    <label class="form-label">Status</label>
-                    <select class="form-select" name="status">
-                        <option value="">All Status</option>
-                        <option value="success" <?= $status_filter === 'success' ? 'selected' : '' ?>>Success</option>
-                        <option value="failed" <?= $status_filter === 'failed' ? 'selected' : '' ?>>Failed</option>
-                        <option value="pending" <?= $status_filter === 'pending' ? 'selected' : '' ?>>Pending</option>
-                        <option value="refunded" <?= $status_filter === 'refunded' ? 'selected' : '' ?>>Refunded</option>
-                    </select>
-                </div> -->
                 <div class="form-group">
                     <label class="form-label">Type</label>
                     <select class="form-select" name="type">
@@ -1423,7 +1416,7 @@ $success_rate = $stats['total_transactions'] > 0 ? ($stats['successful_transacti
             }
         });
 
-        console.log('Transaction Management System loaded successfully (Simplified - No Platform Fees)');
+        console.log('Transaction Management System loaded successfully (Fixed Security Logging)');
     </script>
 </body>
 </html>

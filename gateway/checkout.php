@@ -1,7 +1,5 @@
 <?php
-// gateway/checkout.php
-// This is where your API key gets validated
-
+// gateway/checkout.php - Updated for new gateway architecture
 session_start();
 require_once '../customer_side/config.php';
 
@@ -11,12 +9,10 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $merchant_id = $_POST['merchant_id'] ?? '';
-$api_key = $_POST['api_key'] ?? '';  // ✅ GET THE API KEY
+$api_key = $_POST['api_key'] ?? '';
 $amount = floatval($_POST['amount'] ?? 0);
 $order_id = $_POST['order_id'] ?? '';
 $currency = $_POST['currency'] ?? 'MYR';
-$return_url = $_POST['return_url'] ?? '';
-$cancel_url = $_POST['cancel_url'] ?? '';
 $description = $_POST['description'] ?? '';
 
 // ✅ STRICT VALIDATION: Check for missing credentials
@@ -28,10 +24,10 @@ if (empty($api_key)) {
     die('❌ Missing API key - unauthorized access');
 }
 
-// ✅ VALIDATE: Both merchant ID AND API key must match
+// ✅ VALIDATE: Both merchant ID AND API key must match, get return_url from database
 $conn = dbConnect();
 $merchant_stmt = $conn->prepare("
-    SELECT id, name, api_key, is_active 
+    SELECT id, name, api_key, is_active, return_url 
     FROM merchants 
     WHERE merchant_id = ? AND api_key = ?
 ");
@@ -51,6 +47,12 @@ if (!$merchant['is_active']) {
     die('❌ Merchant account is not active');
 }
 
+// ✅ NEW: Get merchant main page URL from database
+$merchant_main_url = $merchant['return_url'] ?? '';
+if (empty($merchant_main_url)) {
+    die('❌ Merchant main page URL not configured');
+}
+
 // ✅ SECURITY LOG: Record successful authentication
 error_log("Gateway: Successful authentication for merchant: {$merchant_id}");
 
@@ -59,18 +61,17 @@ if ($amount <= 0 || $amount > 10000) {
     die('❌ Invalid payment amount: RM ' . $amount);
 }
 
-// ✅ Only create session AFTER successful validation
+// ✅ NEW: Create session with merchant main page URL
 $_SESSION['gateway_payment'] = [
     'merchant_id' => $merchant_id,
     'merchant_name' => $merchant['name'],
+    'merchant_main_url' => $merchant_main_url, // ✅ NEW: Store main page URL
     'amount' => $amount,
     'order_id' => $order_id,
     'currency' => $currency,
-    'return_url' => $return_url,
-    'cancel_url' => $cancel_url,
     'description' => $description,
     'timestamp' => time(),
-    'validated' => true  // ✅ Mark as properly validated
+    'validated' => true
 ];
 
 $conn->close();
@@ -233,6 +234,17 @@ $conn->close();
             font-size: 12px;
             color: #2e7d32;
         }
+
+        /* ✅ NEW: Gateway architecture notice */
+        .gateway-notice {
+            background: linear-gradient(135deg, #fff3cd, #ffeaa7);
+            border: 2px solid #f39c12;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 20px;
+            font-size: 13px;
+            color: #856404;
+        }
     </style>
 </head>
 <body>
@@ -283,10 +295,15 @@ $conn->close();
             <span>Secured by SSL & Biometric Authentication</span>
         </div>
 
-        <div class="auth-success">
+        <!-- <div class="auth-success">
             ✅ <strong>Merchant Authenticated Successfully</strong><br>
             API credentials verified and session secured
-        </div>
+        </div> -->
+
+        <!-- <div class="gateway-notice">
+            <i class="fas fa-info-circle"></i>
+            <strong>Gateway Flow:</strong> After payment completion, you'll be returned to <?= htmlspecialchars($merchant['name']) ?> automatically.
+        </div> -->
     </div>
 
     <script>
@@ -296,8 +313,39 @@ $conn->close();
         }
 
         function cancelPayment() {
-            // Redirect back to merchant's cancel URL
-            window.location.href = '<?= htmlspecialchars($cancel_url) ?>?status=cancelled&order_id=<?= urlencode($order_id) ?>';
+            if (confirm('Are you sure you want to cancel this payment?')) {
+                // Clear any client-side data
+                if (typeof(Storage) !== "undefined") {
+                    sessionStorage.clear();
+                    localStorage.clear();
+                }
+                
+                // ✅ FIXED: Use POST form to avoid URL encoding issues
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '../customer_side/payment/payment_failed.php';
+                
+                const fields = {
+                    'status': 'cancelled',
+                    'order_id': '<?= htmlspecialchars($order_id) ?>',
+                    'amount': '<?= $amount ?>',
+                    'currency': '<?= htmlspecialchars($currency) ?>',
+                    'merchant_name': '<?= htmlspecialchars($merchant['name']) ?>',
+                    'merchant_url': '<?= htmlspecialchars($merchant_main_url) ?>',
+                    'error': 'Payment cancelled by user at gateway'
+                };
+                
+                Object.keys(fields).forEach(key => {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = key;
+                    input.value = fields[key];
+                    form.appendChild(input);
+                });
+                
+                document.body.appendChild(form);
+                form.submit();
+            }
         }
 
         // Auto-cancel after 10 minutes

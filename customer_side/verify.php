@@ -84,7 +84,7 @@ if (!empty($token)) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Email Verification - Secure FacePay</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
             --primary: #3498db;
@@ -153,6 +153,7 @@ if (!empty($token)) {
             justify-content: center;
             margin: 0 auto 20px;
             animation: pulse 2s infinite;
+            position: relative;
         }
         
         @keyframes pulse {
@@ -163,6 +164,34 @@ if (!empty($token)) {
         .logo i {
             font-size: 32px;
             color: white;
+        }
+        
+        /* Custom email verification icon */
+        .email-verified-icon {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .email-verified-icon .fa-envelope {
+            font-size: 32px;
+            color: white;
+        }
+        
+        .email-verified-icon .fa-check {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            font-size: 16px;
+            color: #ffffff;
+            background: #48bb78;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            padding: 2px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
         h2 {
@@ -305,7 +334,10 @@ if (!empty($token)) {
     <div class="container">
         <div class="form-container">
             <div class="logo">
-                <i class="fas fa-envelope-check"></i>
+                <span class="email-verified-icon">
+                    <i class="fas fa-envelope"></i>
+                    <i class="fas fa-check"></i>
+                </span>
             </div>
             
             <h2>Email Verification</h2>

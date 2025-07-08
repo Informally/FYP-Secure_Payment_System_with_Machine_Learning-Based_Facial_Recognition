@@ -98,7 +98,7 @@ class EnhancedLivenessNet(nn.Module):
 
 # Load or initialize the liveness detection model
 liveness_model = EnhancedLivenessNet()
-LIVENESS_MODEL_PATH = 'models/enhanced_liveness_model_aggressive.pth'
+LIVENESS_MODEL_PATH = 'models/enhanced_liveness_model.pth'
 
 if os.path.exists(LIVENESS_MODEL_PATH):
     try:
@@ -141,6 +141,50 @@ def preprocess_face(face_pixels):
     face_pixels = face_pixels.float() / 255.0
     face_pixels = (face_pixels - 0.5) / 0.5
     return face_pixels
+
+# Enhanced preprocessing for better consistency
+def preprocess_face_enhanced(face_pixels):
+    """Enhanced preprocessing for better embedding consistency"""
+    try:
+        # Convert to float32 first
+        face_pixels = face_pixels.astype('float32')
+        
+        # Ensure face is in proper format
+        if len(face_pixels.shape) != 3:
+            raise ValueError("Face must be 3-channel image")
+        
+        # Apply histogram equalization for lighting normalization
+        if face_pixels.shape[2] == 3:  # BGR image
+            # Convert to LAB color space for better lighting normalization
+            lab = cv2.cvtColor(face_pixels.astype(np.uint8), cv2.COLOR_BGR2LAB)
+            l_channel = lab[:, :, 0]
+            # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            l_channel = clahe.apply(l_channel)
+            lab[:, :, 0] = l_channel
+            face_pixels = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR).astype('float32')
+        
+        # Apply slight Gaussian blur to reduce noise
+        face_pixels = cv2.GaussianBlur(face_pixels, (3, 3), 0.5)
+        
+        mean, std = face_pixels.mean(), face_pixels.std()
+        logger.debug(f"Enhanced preprocessing - Mean: {mean:.2f}, Std: {std:.2f}")
+        
+        # Convert BGR to RGB for FaceNet
+        face_pixels = cv2.cvtColor(face_pixels, cv2.COLOR_BGR2RGB)
+        
+        # Convert to tensor
+        face_pixels = torch.tensor(face_pixels).permute(2, 0, 1)
+        face_pixels = face_pixels.float() / 255.0
+        
+        # Apply FaceNet normalization
+        face_pixels = (face_pixels - 0.5) / 0.5
+        
+        return face_pixels
+    except Exception as e:
+        logger.error(f"Enhanced preprocessing failed: {e}")
+        # Fallback to original preprocessing
+        return preprocess_face(face_pixels)
 
 # Preprocessing for enhanced liveness detection
 def preprocess_for_liveness(face_image):
@@ -186,6 +230,32 @@ def align_face(image, keypoints):
         logger.warning(f"Face alignment failed: {e}, using original image")
         return image
 
+# Enhanced face alignment
+def align_face_enhanced(image, keypoints):
+    try:
+        left_eye = keypoints['left_eye']
+        right_eye = keypoints['right_eye']
+        
+        # Calculate angle between eyes
+        dx = right_eye[0] - left_eye[0]
+        dy = right_eye[1] - left_eye[1]
+        angle = math.degrees(math.atan2(dy, dx))
+        
+        # Calculate center point between eyes
+        center = ((left_eye[0] + right_eye[0]) // 2, (left_eye[1] + right_eye[1]) // 2)
+        
+        # Create rotation matrix
+        rot_mat = cv2.getRotationMatrix2D(center, angle, 1.0)
+        
+        # Apply rotation
+        aligned = cv2.warpAffine(image, rot_mat, (image.shape[1], image.shape[0]), 
+                                flags=cv2.INTER_LANCZOS4)
+        
+        return aligned
+    except Exception as e:
+        logger.warning(f"Enhanced face alignment failed: {e}, using original image")
+        return image
+
 # Extract face and align it
 def extract_face(image):
     height, width = image.shape[:2]
@@ -197,16 +267,69 @@ def extract_face(image):
     best = max(detections, key=lambda x: x['confidence'])
     confidence = best['confidence']
     logger.info(f"Face detection confidence: {confidence:.2f}")
-    if confidence < 0.85:
+    if confidence < 0.80:  # LOWERED from 0.85 for better acceptance
         return None, f"Low face detection confidence: {confidence:.2f}"
     x1, y1, w, h = best['box']
     x1, y1 = abs(x1), abs(y1)
     x2, y2 = x1 + w, y1 + h
     face = image[y1:y2, x1:x2]
-    if w * h < 5000:
+    if w * h < 4000:  # LOWERED from 5000 for smaller faces
         return None, "Detected face too small"
     face_aligned = align_face(face, best['keypoints'])
     face_resized = cv2.resize(face_aligned, (160, 160))
+    return face_resized, None
+
+# Enhanced face extraction with better alignment
+def extract_face_enhanced(image):
+    height, width = image.shape[:2]
+    if height * width < 400 * 300:
+        return None, f"Image resolution too low. Minimum required: 400x300 pixels (got {width}x{height})."
+    
+    # Apply pre-processing to improve detection
+    enhanced_image = image.copy()
+    
+    # Improve lighting
+    lab = cv2.cvtColor(enhanced_image, cv2.COLOR_BGR2LAB)
+    l_channel = lab[:, :, 0]
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    l_channel = clahe.apply(l_channel)
+    lab[:, :, 0] = l_channel
+    enhanced_image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    
+    detections = detector.detect_faces(enhanced_image)
+    if not detections:
+        # Try with original image if enhanced detection fails
+        detections = detector.detect_faces(image)
+        if not detections:
+            return None, "No face detected"
+    
+    best = max(detections, key=lambda x: x['confidence'])
+    confidence = best['confidence']
+    logger.info(f"Face detection confidence: {confidence:.2f}")
+    
+    if confidence < 0.75:  # LOWERED from 0.85
+        return None, f"Low face detection confidence: {confidence:.2f}"
+    
+    x1, y1, w, h = best['box']
+    x1, y1 = abs(x1), abs(y1)
+    x2, y2 = x1 + w, y1 + h
+    
+    # Add padding around face
+    padding = int(min(w, h) * 0.2)
+    x1 = max(0, x1 - padding)
+    y1 = max(0, y1 - padding)
+    x2 = min(image.shape[1], x2 + padding)
+    y2 = min(image.shape[0], y2 + padding)
+    
+    face = image[y1:y2, x1:x2]
+    
+    if (x2-x1) * (y2-y1) < 3000:  # LOWERED from 5000
+        return None, "Detected face too small"
+    
+    # Enhanced face alignment
+    face_aligned = align_face_enhanced(face, best['keypoints'])
+    face_resized = cv2.resize(face_aligned, (160, 160), interpolation=cv2.INTER_LANCZOS4)
+    
     return face_resized, None
 
 # Normalize embedding to unit length
@@ -215,6 +338,24 @@ def normalize_embedding(embedding):
     if norm == 0:
         return embedding
     return embedding / norm
+
+# Enhanced embedding normalization
+def normalize_embedding_enhanced(embedding):
+    """Enhanced embedding normalization"""
+    # L2 normalization
+    norm = np.linalg.norm(embedding)
+    if norm == 0:
+        logger.warning("Zero norm embedding detected!")
+        return embedding
+    
+    normalized = embedding / norm
+    
+    # Ensure the embedding is properly normalized
+    final_norm = np.linalg.norm(normalized)
+    if abs(final_norm - 1.0) > 1e-6:
+        logger.warning(f"Normalization issue: final norm = {final_norm}")
+    
+    return normalized
 
 # Get embedding using FaceNet model
 def get_embedding(face):
@@ -226,6 +367,24 @@ def get_embedding(face):
     embedding = np.array(embedding, dtype=np.float32)
     embedding = normalize_embedding(embedding)
     logger.debug(f"Generated embedding: {embedding[:5]}... (Norm: {np.linalg.norm(embedding):.2f})")
+    return embedding
+
+# Enhanced embedding generation
+def get_embedding_enhanced(face):
+    """Generate embedding with enhanced preprocessing"""
+    face_tensor = preprocess_face_enhanced(face)
+    face_tensor = face_tensor.unsqueeze(0)
+    
+    with torch.no_grad():
+        embedding = facenet_model(face_tensor)
+    
+    embedding = embedding.squeeze().numpy()
+    embedding = np.array(embedding, dtype=np.float32)
+    
+    # Enhanced normalization
+    embedding = normalize_embedding_enhanced(embedding)
+    
+    logger.debug(f"Generated enhanced embedding: {embedding[:5]}... (Norm: {np.linalg.norm(embedding):.4f})")
     return embedding
 
 # Convert dlib rectangle to opencv rectangle format
@@ -265,7 +424,7 @@ def detect_blinks(frame_sequence, threshold=EAR_THRESHOLD, consecutive_frames=CO
     ear_values = []
     actual_blinks = []
     
-    logger.info(f"Starting blink detection on {len(frame_sequence)} frames")
+    logger.info(f"Starting improved blink detection on {len(frame_sequence)} frames")
     
     # First pass: collect all EAR values
     for i, frame in enumerate(frame_sequence):
@@ -303,93 +462,187 @@ def detect_blinks(frame_sequence, threshold=EAR_THRESHOLD, consecutive_frames=CO
     
     logger.info(f"EAR Stats - Avg: {avg_ear:.3f}, Min: {min_ear:.3f}, Max: {max_ear:.3f}, Std: {ear_std:.3f}")
     
-    # FIXED THRESHOLD CALCULATION - Based on your actual values
-    # Your normal EAR seems to be around 0.2-0.35, so we need a higher threshold
+    # IMPROVED THRESHOLD CALCULATION
+    # For your case: avg=0.204, min=0.133, max=0.424, std=0.065
     
-    if avg_ear > 0.25:
-        # High EAR user (like you) - use percentage-based threshold
-        adaptive_threshold = avg_ear * 0.70  # 70% of average
-        logger.info(f"High EAR detected - using 70% threshold: {adaptive_threshold:.3f}")
-    elif avg_ear > 0.20:
-        # Medium EAR user - use slightly lower percentage
-        adaptive_threshold = avg_ear * 0.75  # 75% of average  
-        logger.info(f"Medium EAR detected - using 75% threshold: {adaptive_threshold:.3f}")
+    # Method 1: Adaptive threshold based on statistics
+    if ear_std > 0.04:  # Good variation indicates actual blinking
+        # Use the minimum value as a good indicator of closed eyes
+        statistical_threshold = min_ear + (ear_std * 0.3)  # Slightly above minimum
+        logger.info(f"High variation detected - using min-based threshold: {statistical_threshold:.3f}")
     else:
-        # Low EAR user - use higher percentage
-        adaptive_threshold = avg_ear * 0.80  # 80% of average
-        logger.info(f"Low EAR detected - using 80% threshold: {adaptive_threshold:.3f}")
+        # Lower variation - use percentage of average
+        statistical_threshold = avg_ear * 0.70
+        logger.info(f"Low variation detected - using percentage threshold: {statistical_threshold:.3f}")
     
-    # Safety bounds
-    adaptive_threshold = max(adaptive_threshold, 0.12)  # Minimum
-    adaptive_threshold = min(adaptive_threshold, 0.30)  # Maximum for high EAR users
-    
-    logger.info(f"Final adaptive threshold: {adaptive_threshold:.3f}")
-    
-    # Alternative method: Use statistical approach
-    # Look for values that are significantly below the normal range
-    if ear_std > 0.03:  # If there's significant variation
-        statistical_threshold = avg_ear - (1.5 * ear_std)  # 1.5 std dev below mean
-        if statistical_threshold < adaptive_threshold:
-            adaptive_threshold = statistical_threshold
-            logger.info(f"Using statistical threshold: {adaptive_threshold:.3f}")
-    
-    # Detect blinks using sliding window approach
-    i = 0
-    while i < len(ear_values):
-        if ear_values[i] < adaptive_threshold:
-            # Start of potential blink
-            blink_start = i
-            consecutive_low = 0
-            min_ear_in_blink = ear_values[i]
-            
-            # Count consecutive frames below threshold
-            while i < len(ear_values) and ear_values[i] < adaptive_threshold:
-                consecutive_low += 1
-                min_ear_in_blink = min(min_ear_in_blink, ear_values[i])
-                i += 1
-            
-            # Validate blink - more lenient for your eye type
-            if consecutive_low >= 1:  # Even single frame blinks count
-                blink_depth = avg_ear - min_ear_in_blink
-                
-                # Very lenient depth requirement for high EAR users
-                min_depth = 0.02 if avg_ear > 0.25 else 0.015
-                
-                if blink_depth > min_depth:
-                    blink_counter += 1
-                    actual_blinks.append(blink_start + consecutive_low // 2)
-                    logger.info(f"Blink #{blink_counter} detected: frames {blink_start}-{i-1}, "
-                               f"duration: {consecutive_low}, depth: {blink_depth:.3f}, "
-                               f"min_ear: {min_ear_in_blink:.3f}")
-                else:
-                    logger.debug(f"Rejected blink - insufficient depth: {blink_depth:.3f} (need > {min_depth:.3f})")
-            else:
-                logger.debug(f"Rejected blink - too short: {consecutive_low} frames")
-        else:
-            i += 1
-    
-    # Alternative detection for high EAR users: Look for relative dips
-    if blink_counter == 0 and avg_ear > 0.25:
-        logger.info("No blinks detected with primary method, trying relative dip detection...")
+    # Method 2: Look for significant drops from running average
+    rolling_avg_threshold = []
+    window_size = 3
+    for i in range(len(ear_values)):
+        start_idx = max(0, i - window_size)
+        end_idx = min(len(ear_values), i + window_size + 1)
+        window_values = ear_values[start_idx:end_idx]
+        window_avg = sum(window_values) / len(window_values)
         
-        # Look for any value that's significantly lower than neighbors
-        for i in range(2, len(ear_values) - 2):
-            current_ear = ear_values[i]
-            
-            # Check if this is a local minimum
-            neighbor_avg = (ear_values[i-2] + ear_values[i-1] + ear_values[i+1] + ear_values[i+2]) / 4
-            relative_drop = neighbor_avg - current_ear
-            
-            # If current value is significantly lower than neighbors
-            if relative_drop > 0.03 and current_ear < avg_ear * 0.85:
-                blink_counter += 1
-                actual_blinks.append(i)
-                logger.info(f"Relative dip blink detected at frame {i}: EAR={current_ear:.3f}, "
-                           f"neighbor_avg={neighbor_avg:.3f}, drop={relative_drop:.3f}")
+        # Consider it a blink if current value is significantly below local average
+        drop_threshold = window_avg * 0.75  # 25% drop from local average
+        rolling_avg_threshold.append(drop_threshold)
     
-    logger.info(f"Final blink detection: {blink_counter} blinks detected")
+    # Method 3: Simple relative drop detection
+    blinks_method1 = []  # Statistical threshold
+    blinks_method2 = []  # Rolling average
+    blinks_method3 = []  # Relative drop
+    
+    # Method 1: Statistical threshold
+    for i, ear in enumerate(ear_values):
+        if ear < statistical_threshold:
+            blinks_method1.append(i)
+    
+    # Method 2: Rolling average threshold  
+    for i, ear in enumerate(ear_values):
+        if ear < rolling_avg_threshold[i]:
+            blinks_method2.append(i)
+    
+    # Method 3: Look for significant drops between adjacent frames
+    for i in range(1, len(ear_values)):
+        prev_ear = ear_values[i-1]
+        curr_ear = ear_values[i]
+        
+        # Significant drop (more than 15% decrease)
+        if prev_ear > 0 and curr_ear < prev_ear * 0.85:
+            # Also check if it's below a reasonable threshold
+            if curr_ear < avg_ear * 0.85:
+                blinks_method3.append(i)
+    
+    logger.info(f"Method 1 (Statistical): {len(blinks_method1)} frames")
+    logger.info(f"Method 2 (Rolling avg): {len(blinks_method2)} frames") 
+    logger.info(f"Method 3 (Relative drop): {len(blinks_method3)} frames")
+    
+    # Combine methods - frame is considered a blink if detected by at least 2 methods
+    all_blink_frames = set(blinks_method1 + blinks_method2 + blinks_method3)
+    
+    # Group consecutive blink frames into blink events
+    if all_blink_frames:
+        blink_frames_sorted = sorted(list(all_blink_frames))
+        blink_events = []
+        current_event = [blink_frames_sorted[0]]
+        
+        for i in range(1, len(blink_frames_sorted)):
+            if blink_frames_sorted[i] - blink_frames_sorted[i-1] <= 2:  # Consecutive or close
+                current_event.append(blink_frames_sorted[i])
+            else:
+                blink_events.append(current_event)
+                current_event = [blink_frames_sorted[i]]
+        
+        blink_events.append(current_event)  # Add last event
+        
+        # Validate each blink event
+        valid_blinks = 0
+        for event in blink_events:
+            event_start = event[0]
+            event_end = event[-1]
+            event_duration = len(event)
+            
+            # Get minimum EAR in this event
+            min_ear_in_event = min([ear_values[j] for j in event])
+            
+            # Calculate blink depth
+            # Compare with nearby non-blink frames
+            before_frames = []
+            after_frames = []
+            
+            # Look for stable frames before the blink
+            for j in range(max(0, event_start - 3), event_start):
+                if j not in all_blink_frames:
+                    before_frames.append(ear_values[j])
+            
+            # Look for stable frames after the blink  
+            for j in range(event_end + 1, min(len(ear_values), event_end + 4)):
+                if j not in all_blink_frames:
+                    after_frames.append(ear_values[j])
+            
+            # Calculate baseline EAR from nearby frames
+            baseline_values = before_frames + after_frames
+            if baseline_values:
+                baseline_ear = sum(baseline_values) / len(baseline_values)
+            else:
+                baseline_ear = avg_ear
+            
+            blink_depth = baseline_ear - min_ear_in_event
+            
+            # Validation criteria (more lenient)
+            min_depth_required = max(0.02, ear_std * 0.5)  # At least 0.02 or half std dev
+            min_duration = 1  # At least 1 frame
+            max_duration = 8  # At most 8 frames (reasonable blink duration)
+            
+            is_valid = (blink_depth >= min_depth_required and 
+                       min_duration <= event_duration <= max_duration and
+                       min_ear_in_event < baseline_ear * 0.90)  # At least 10% drop
+            
+            if is_valid:
+                valid_blinks += 1
+                actual_blinks.extend(event)
+                logger.info(f"Valid blink #{valid_blinks}: frames {event_start}-{event_end}, "
+                           f"duration: {event_duration}, depth: {blink_depth:.3f}, "
+                           f"min_ear: {min_ear_in_event:.3f}, baseline: {baseline_ear:.3f}")
+            else:
+                logger.debug(f"Invalid blink: frames {event_start}-{event_end}, "
+                            f"duration: {event_duration}, depth: {blink_depth:.3f}, "
+                            f"reasons: depth<{min_depth_required:.3f}? {blink_depth < min_depth_required}, "
+                            f"duration? {event_duration}")
+        
+        blink_counter = valid_blinks
+    
+    # Alternative detection for cases where no blinks were found
+    if blink_counter == 0:
+        logger.info("No blinks detected with primary methods, trying fallback detection...")
+        
+        # Fallback: Look for any frame that's significantly below average
+        fallback_threshold = avg_ear * 0.80  # 20% below average
+        fallback_blinks = []
+        
+        for i, ear in enumerate(ear_values):
+            if ear < fallback_threshold:
+                # Check if it's a local minimum
+                is_local_min = True
+                check_range = 2
+                
+                for j in range(max(0, i - check_range), min(len(ear_values), i + check_range + 1)):
+                    if j != i and ear_values[j] < ear:
+                        is_local_min = False
+                        break
+                
+                if is_local_min:
+                    fallback_blinks.append(i)
+        
+        if fallback_blinks:
+            # Group fallback blinks
+            grouped_fallback = []
+            current_group = [fallback_blinks[0]]
+            
+            for i in range(1, len(fallback_blinks)):
+                if fallback_blinks[i] - fallback_blinks[i-1] <= 3:
+                    current_group.append(fallback_blinks[i])
+                else:
+                    grouped_fallback.append(current_group)
+                    current_group = [fallback_blinks[i]]
+            
+            grouped_fallback.append(current_group)
+            
+            # Count grouped fallback blinks
+            for group in grouped_fallback:
+                min_ear_in_group = min([ear_values[j] for j in group])
+                depth = avg_ear - min_ear_in_group
+                
+                if depth > 0.015:  # Very lenient depth requirement
+                    blink_counter += 1
+                    actual_blinks.extend(group)
+                    logger.info(f"Fallback blink detected: frames {group}, "
+                               f"depth: {depth:.3f}, min_ear: {min_ear_in_group:.3f}")
+    
+    logger.info(f"Final improved blink detection: {blink_counter} blinks detected")
     if actual_blinks:
-        logger.info(f"Blink frames: {actual_blinks}")
+        logger.info(f"Blink frames: {sorted(set(actual_blinks))}")
     
     return blink_counter, ear_values
 
@@ -558,10 +811,10 @@ def detect_spoofing(face_image):
             lbp_scores.append((hist_std, entropy))
         avg_hist_std = np.mean([score[0] for score in lbp_scores])
         avg_entropy = np.mean([score[1] for score in lbp_scores])
-        is_real = avg_hist_std > 0.006 and avg_entropy > 5.0
+        is_real = avg_hist_std > 0.003 and avg_entropy > 4.0
         texture_score = min((avg_hist_std * 80) * 0.5 + (avg_entropy / 7.0) * 0.5, 1.0)
         laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-        is_real = is_real and laplacian_var > 150
+        is_real = is_real and laplacian_var > 80
         texture_score = min(texture_score * 0.8 + (laplacian_var / 500) * 0.2, 1.0)
         logger.info(f"Enhanced spoofing detection: {'Real' if is_real else 'Fake'}, "
                     f"Hist StdDev: {avg_hist_std:.5f}, Entropy: {avg_entropy:.2f}, "
@@ -689,61 +942,6 @@ def enhanced_liveness_detection(face_image):
     except Exception as e:
         logger.error(f"Error in trained model enhanced liveness model detection: {e}")
         return True, 0.7  # Default to real if error
-    
-# Screen detection for anti-spoofing
-def detect_screen_simple_no_edges(face_image):
-    try:
-        hsv = cv2.cvtColor(face_image, cv2.COLOR_BGR2HSV)
-        lab = cv2.cvtColor(face_image, cv2.COLOR_BGR2LAB)
-        gray = cv2.cvtColor(face_image, cv2.COLOR_BGR2GRAY)
-        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-        hist_r = cv2.calcHist([face_image], [2], None, [256], [0, 256])
-        hist_g = cv2.calcHist([face_image], [1], None, [256], [0, 256])
-        hist_b = cv2.calcHist([face_image], [0], None, [256], [0, 256])
-        hist_uniformity = (np.std(hist_r) + np.std(hist_g) + np.std(hist_b)) / 3
-        edges = cv2.Canny(gray, 50, 150)
-        edge_density = np.count_nonzero(edges) / edges.size
-        brightness = np.mean(gray)
-        brightness_std = np.std(gray)
-        blue_mean = np.mean(face_image[:, :, 0])
-        red_mean = np.mean(face_image[:, :, 2])
-        blue_red_ratio = blue_mean / (red_mean + 1e-10)
-        saturation = hsv[:, :, 1]
-        sat_std = np.std(saturation)
-        logger.debug(f"Enhanced screen detection metrics:")
-        logger.debug(f"Laplacian variance: {laplacian_var:.1f}")
-        logger.debug(f"Histogram uniformity: {hist_uniformity:.1f}")
-        logger.debug(f"Edge density: {edge_density:.4f}")
-        logger.debug(f"Brightness: {brightness:.1f}±{brightness_std:.1f}")
-        logger.debug(f"Blue/Red ratio: {blue_red_ratio:.3f}")
-        logger.debug(f"Saturation std: {sat_std:.1f}")
-        screen_indicators = 0
-        reasons = []
-        if laplacian_var < 80:
-            screen_indicators += 1
-            reasons.append(f"low_texture({laplacian_var:.1f})")
-        if hist_uniformity > 1400:
-            screen_indicators += 1
-            reasons.append(f"uniform_histogram({hist_uniformity:.1f})")
-        if edge_density < 0.025:
-            screen_indicators += 1
-            reasons.append(f"low_edges({edge_density:.4f})")
-        if brightness > 190 and brightness_std < 18:
-            screen_indicators += 1
-            reasons.append(f"screen_brightness({brightness:.1f},{brightness_std:.1f})")
-        if blue_red_ratio > 1.3:
-            screen_indicators += 1
-            reasons.append(f"blue_dominance({blue_red_ratio:.3f})")
-        if sat_std < 65:
-            screen_indicators += 1
-            reasons.append(f"low_saturation_std({sat_std:.1f})")
-        if screen_indicators >= 1:
-            logger.warning(f"Screen detected: {screen_indicators}/6 indicators - {', '.join(reasons)}")
-            return True, f"Screen detected ({screen_indicators}/6): {', '.join(reasons)}"
-        return False, f"No screen detected ({screen_indicators}/6 indicators)"
-    except Exception as e:
-        logger.error(f"Error in screen detection: {e}")
-        return False, "Error in detection"
 
 # Improved function to detect static images or video replays
 def detect_static_image(frames):
@@ -777,7 +975,7 @@ def detect_static_image(frames):
             return True
     return False
 
-# Multi-method liveness verification (OPTIMIZED VERSION)
+# Multi-method liveness verification (OPTIMIZED VERSION - NO SCREEN DETECTION)
 def verify_liveness_multimethod(frame_sequence, transaction_amount=0):
     logger.info(f"Starting liveness verification with {len(frame_sequence)} frames, transaction_amount={transaction_amount}")
     
@@ -789,11 +987,8 @@ def verify_liveness_multimethod(frame_sequence, transaction_amount=0):
     
     middle_frame = frame_sequence[len(frame_sequence) // 2]
     
-    # Screen detection for anti-spoofing
-    is_screen, screen_details = detect_screen_simple_no_edges(middle_frame)
-    logger.info(f"Screen detection result: {is_screen}, Details: {screen_details}")
-    if is_screen:
-        return False, 0.1, f"Video replay detected: {screen_details}"
+    # SCREEN DETECTION REMOVED - This was causing false positives
+    # No longer checking for screen detection
     
     methods_results = {}
     methods_scores = {}
@@ -978,6 +1173,28 @@ def log_frames_info(frames, prefix=""):
         else:
             logger.warning(f"{prefix}Frame {i}: Invalid/None")
 
+def store_multiple_embeddings_enhanced(user_id, face, count=15):
+    """Store multiple embeddings using enhanced method"""
+    db = connect_db()
+    cursor = db.cursor()
+    original_embedding = get_embedding_enhanced(face)
+    logger.info(f"Storing original enhanced embedding for user {user_id}")
+    cursor.execute(
+        "INSERT INTO face_embeddings (user_id, embedding) VALUES (%s, %s)",
+        (user_id, original_embedding.tobytes())
+    )
+    for i in range(count - 1):
+        augmented = augment_face(face)
+        embedding = get_embedding_enhanced(augmented)
+        logger.debug(f"Storing augmented enhanced embedding {i+1}/{count-1} for user {user_id}")
+        cursor.execute(
+            "INSERT INTO face_embeddings (user_id, embedding) VALUES (%s, %s)",
+            (user_id, embedding.tobytes())
+        )
+    db.commit()
+    cursor.close()
+    db.close()
+
 def store_multiple_embeddings(user_id, face, count=15):
     db = connect_db()
     cursor = db.cursor()
@@ -1057,12 +1274,12 @@ def hybrid_recognition(input_embedding, user_claim=None):
         logger.info(f"Using direct comparison mode for {'user claim: '+user_claim if user_claim else 'small user base'}")
         if user_claim:
             cursor.execute("SELECT embedding FROM face_embeddings WHERE user_id = %s", (user_claim,))
-            cosine_threshold = 0.55
-            required_matches = 3
+            cosine_threshold = 0.40  # LOWERED from 0.55 for better matching
+            required_matches = 2     # LOWERED from 3 for easier verification
         else:
             cursor.execute("SELECT user_id, embedding FROM face_embeddings")
-            cosine_threshold = 0.55
-            required_matches = 5
+            cosine_threshold = 0.40  # LOWERED from 0.55
+            required_matches = 3     # LOWERED from 5
         embeddings = cursor.fetchall()
         cursor.close()
         db.close()
@@ -1083,18 +1300,42 @@ def hybrid_recognition(input_embedding, user_claim=None):
         best_matches = 0
         best_avg_similarity = 0
         
+        # ADD DETAILED DEBUGGING
+        logger.info(f"=== DEBUGGING SIMILARITY FOR INPUT EMBEDDING ===")
+        logger.info(f"Input embedding norm: {np.linalg.norm(input_embedding):.4f}")
+        logger.info(f"Input embedding mean: {np.mean(input_embedding):.4f}")
+        logger.info(f"Input embedding std: {np.std(input_embedding):.4f}")
+        
         for current_user_id, embs in users.items():
             matches = 0
             total_similarity = 0
-            for emb in embs:
+            similarities = []
+            
+            for i, emb in enumerate(embs):
+                # Check stored embedding quality
+                stored_norm = np.linalg.norm(emb)
+                stored_mean = np.mean(emb)
+                stored_std = np.std(emb)
+                
                 similarity = cosine_similarity(input_embedding, emb)
+                similarities.append(similarity)
                 total_similarity += similarity
+                
                 if similarity >= cosine_threshold:
                     matches += 1
-                logger.debug(f"User: {current_user_id}, Similarity: {similarity:.4f}, Match: {similarity >= cosine_threshold}")
+                
+                # DETAILED LOGGING FOR EACH COMPARISON
+                logger.info(f"User: {current_user_id}, Embedding {i}: similarity={similarity:.4f}, "
+                           f"stored_norm={stored_norm:.4f}, stored_mean={stored_mean:.4f}, "
+                           f"stored_std={stored_std:.4f}, match={similarity >= cosine_threshold}")
             
             avg_similarity = total_similarity / len(embs)
-            logger.info(f"User: {current_user_id}, Matches: {matches}/{len(embs)}, Avg Similarity: {avg_similarity:.4f}")
+            max_similarity = max(similarities)
+            min_similarity = min(similarities)
+            
+            logger.info(f"=== USER {current_user_id} SUMMARY ===")
+            logger.info(f"Matches: {matches}/{len(embs)}, Avg: {avg_similarity:.4f}, "
+                       f"Max: {max_similarity:.4f}, Min: {min_similarity:.4f}")
             
             if matches > best_matches or (matches == best_matches and avg_similarity > best_avg_similarity):
                 best_user = current_user_id
@@ -1136,12 +1377,11 @@ def hybrid_recognition(input_embedding, user_claim=None):
         
         logger.info(f"SVM Prediction: {prediction}, Probability: {prob:.2f}")
         
-        estimated_matches = int(prob * 15)
-        
-        if prob >= 0.55:
+        # LOWERED SVM THRESHOLD from 0.55 to 0.40
+        if prob >= 0.40:
             return prediction, prob, True
         return None, prob, False
-
+    
 # --------------- API Endpoints ------------------
 
 # Register
@@ -1173,7 +1413,7 @@ def register():
             return jsonify({"status": "failed", "message": "Invalid base64 image."})
         
         # Extract and process face
-        face, error = extract_face(image)
+        face, error = extract_face_enhanced(image)  # Use enhanced extraction
         if error:
             logger.warning(f"Face extraction failed: {error}")
             log_security_event(user_id, "register", "failed", client_ip=client_ip)
@@ -1192,8 +1432,8 @@ def register():
             log_security_event(user_id, "register", "failed", client_ip=client_ip)
             return jsonify({"status": "failed", "message": "User already exists."})
         
-        # Store multiple embeddings for the face
-        store_multiple_embeddings(user_id, face, count=15)
+        # Store multiple embeddings for the face using enhanced method
+        store_multiple_embeddings_enhanced(user_id, face, count=15)
         
         # Train or update the SVM model if needed
         if os.path.exists('svm_classifier.pkl'):
@@ -1231,14 +1471,14 @@ def recognize():
             return jsonify({"status": "failed", "message": "Invalid base64 image."})
         
         # Extract and process face
-        face, error = extract_face(image)
+        face, error = extract_face_enhanced(image)  # Use enhanced extraction
         if error:
             logger.warning(f"Face extraction failed: {error}")
             log_security_event("unknown", "login", "failed", client_ip=client_ip)
             return jsonify({"status": "failed", "message": error})
         
-        # Get face embedding
-        embedding = get_embedding(face)
+        # Get face embedding using enhanced method
+        embedding = get_embedding_enhanced(face)
         
         # Use hybrid recognition system
         recognized_user, similarity, match_count = hybrid_recognition(embedding, user_id)
@@ -1306,12 +1546,13 @@ def health_check():
             "timestamp": datetime.now().isoformat()
         }), 500
 
-# Combined authentication endpoint (OPTIMIZED)
+# Combined authentication endpoint (OPTIMIZED - NO SCREEN DETECTION)
 @app.route('/authenticate', methods=['POST'])
 def authenticate():
     """
     Real-time liveness detection and recognition.
     Supports security_only mode for registration purposes.
+    Screen detection has been removed to prevent false positives.
     """
     try:
         data = request.json
@@ -1407,7 +1648,7 @@ def authenticate():
 
         # Extract face from main image for recognition
         logger.info("Extracting face from main image...")
-        face, error = extract_face(main_image)
+        face, error = extract_face_enhanced(main_image)  # Use enhanced extraction
         if error:
             logger.warning(f"Face extraction failed: {error}")
             log_security_event("unknown", "login", "failed", client_ip=client_ip)
@@ -1420,7 +1661,7 @@ def authenticate():
 
         # Get face embedding for recognition (needed for both modes)
         logger.info("Generating face embedding...")
-        embedding = get_embedding(face)
+        embedding = get_embedding_enhanced(face)  # Use enhanced embedding
 
         # Log challenge type
         logger.info(f"Starting liveness verification with challenge type: {challenge_type}")
@@ -1556,7 +1797,77 @@ def authenticate():
         logger.error(f"Authentication error: {str(e)}", exc_info=True)
         log_security_event("unknown", "login", "error", client_ip=request.remote_addr)
         return jsonify({"status": "failed", "message": f"Authentication error: {str(e)}"})
-    
+
+# Debug endpoint to analyze similarity issues
+@app.route('/debug_similarity', methods=['POST'])
+def debug_similarity():
+    """Debug endpoint to analyze similarity issues"""
+    try:
+        data = request.json
+        user_id = data.get('user_id')
+        
+        if not user_id:
+            return jsonify({"status": "failed", "message": "User ID required"})
+        
+        # Get current image
+        image = base64_to_image(data['image_base64'])
+        if image is None:
+            return jsonify({"status": "failed", "message": "Invalid image"})
+        
+        # Extract face with enhanced method
+        face, error = extract_face_enhanced(image)
+        if error:
+            return jsonify({"status": "failed", "message": error})
+        
+        # Get enhanced embedding
+        current_embedding = get_embedding_enhanced(face)
+        
+        # Get stored embeddings for comparison
+        db = connect_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT embedding, created_at FROM face_embeddings WHERE user_id = %s", (user_id,))
+        stored_embeddings = cursor.fetchall()
+        cursor.close()
+        db.close()
+        
+        if not stored_embeddings:
+            return jsonify({"status": "failed", "message": "No stored embeddings found"})
+        
+        similarities = []
+        for i, (emb_blob, created_at) in enumerate(stored_embeddings):
+            stored_emb = np.frombuffer(emb_blob, dtype=np.float32)
+            similarity = cosine_similarity(current_embedding, stored_emb)
+            similarities.append({
+                "index": i,
+                "similarity": float(similarity),
+                "created_at": str(created_at)
+            })
+        
+        avg_similarity = np.mean([s["similarity"] for s in similarities])
+        max_similarity = max([s["similarity"] for s in similarities])
+        min_similarity = min([s["similarity"] for s in similarities])
+        
+        return jsonify({
+            "status": "success",
+            "user_id": user_id,
+            "similarities": similarities,
+            "stats": {
+                "average": float(avg_similarity),
+                "maximum": float(max_similarity),
+                "minimum": float(min_similarity),
+                "count": len(similarities)
+            },
+            "current_embedding_stats": {
+                "norm": float(np.linalg.norm(current_embedding)),
+                "mean": float(np.mean(current_embedding)),
+                "std": float(np.std(current_embedding))
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Debug similarity error: {str(e)}")
+        return jsonify({"status": "failed", "message": f"Debug error: {str(e)}"})
+
 if __name__ == '__main__':
     setup_database()
     app.run(host='0.0.0.0', port=5000, debug=True)

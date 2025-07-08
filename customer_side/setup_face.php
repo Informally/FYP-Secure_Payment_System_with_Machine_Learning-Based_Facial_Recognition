@@ -869,13 +869,12 @@ $csrf_token = generateCSRFToken();
                 <h4><i class="fas fa-shield-alt"></i> Security & Privacy</h4>
                 <ul>
                     <li>Advanced AI protection runs automatically in the background</li>
-                    <li>System detects and prevents photo, video, and deepfake attacks</li>
-                    <li>Your facial data is encrypted and stored securely</li>
+                    <li>System detects and prevents photo and video spoofing</li>
                     <li>No actual photos are saved, only mathematical representations</li>
                     <li>You can re-register or delete your facial data anytime</li>
-                    <?php if (!$is_update): ?>
+                    <!-- <?php if (!$is_update): ?>
                     <li><strong>Your account will be activated automatically after successful registration</strong></li>
-                    <?php endif; ?>
+                    <?php endif; ?> -->
                 </ul>
             </div>
         </div>
