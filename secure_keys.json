@@ -1,0 +1,12 @@
+{
+    "aes_key": "0KvocVvCxtHUCXBQ8LVuztXHBFy7fiyjzhxOsXxQCmU=",
+    "aes_iv": "0OUi5xYbQkZgId+yqOrCUQ==",
+    "jwt_secret": "9b98936e7efd1fec5ede6997b6fc3b34e020c429555574bd235174130ec24fd5",
+    "encryption_key": "5d8755cef84e1c81991688ff4e88d00a",
+    "password_key": "MySecretKey123!@#",
+    "csrf_secret": "17838829df2099208adf86cf02574e71f12209afde00daacf255b34d01710e25",
+    "migration_date": "2025-07-07 05:03:10",
+    "migration_status": "completed_from_legacy",
+    "version": "1.0",
+    "note": "Migrated from hardcoded keys - all existing data preserved"
+}
