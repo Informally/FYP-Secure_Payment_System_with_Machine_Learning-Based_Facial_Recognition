@@ -385,7 +385,7 @@ const FACEPAY_GATEWAY_URL = 'http://localhost/FYP/gateway/checkout.php';
 </head>
 <body>
     <div class="kiosk-header">
-        <h1><i class="fas fa-store"></i> McDonald's Kiosk</h1>
+        <h1><i class="fas fa-store"></i> Prototype Kiosk</h1>
     </div>
 
     <div class="checkout-container">

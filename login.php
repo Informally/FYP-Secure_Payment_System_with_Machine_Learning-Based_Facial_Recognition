@@ -1,35 +1,53 @@
 <?php
+session_start();
 require_once 'config.php';
 require_once 'encrypt.php';
-session_start();
+
+if (isset($_SESSION['user_id'])) {
+    header("Location: dashboard.php");
+    exit();
+}
+
 $error = "";
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
+$username = "";
+
+// Restore cart data if provided
+if (isset($_GET['cart'])) {
+    $cart_data = json_decode(urldecode($_GET['cart']), true);
+    if ($cart_data) {
+        $_SESSION['cart'] = $cart_data;
+    }
+}
+
+$redirect = $_GET['redirect'] ?? 'dashboard.php';
+
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $conn = dbConnect();
     $username = trim($_POST['username']);
     $password = $_POST['password'];
-    if (empty($username) || empty($password)) {
-        $error = "Please fill in all fields.";
-    } else {
-        $stmt = $conn->prepare("SELECT id, password, is_verified FROM users WHERE username = ?");
-        $stmt->bind_param("s", $username);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        if ($row = $result->fetch_assoc()) {
-            if (!$row['is_verified']) {
-                $error = "Please verify your email before logging in.";
+
+    $stmt = $conn->prepare("SELECT id, password, is_verified FROM users WHERE username = ?");
+    $stmt->bind_param("s", $username);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    if ($result->num_rows === 1) {
+        $user = $result->fetch_assoc();
+        $decrypted_password = aes_decrypt($user['password']);
+
+        if ($password === $decrypted_password) {
+            if ($user['is_verified']) {
+                $_SESSION['user_id'] = $user['id'];
+                header("Location: $redirect");
+                exit();
             } else {
-                $decrypted_password = aes_decrypt($row['password']);
-                if ($decrypted_password === $password) {
-                    $_SESSION['user_id'] = $row['id'];
-                    header("Location: dashboard.php");
-                    exit();
-                } else {
-                    $error = "Invalid username or password.";
-                }
+                $error = "Please verify your email before logging in.";
             }
         } else {
             $error = "Invalid username or password.";
         }
+    } else {
+        $error = "Invalid username or password.";
     }
 }
 ?>
@@ -281,54 +299,41 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 <body>
 <div class="container">
     <div class="form-container">
-        <h2><i class="fas fa-user-shield"></i> Login</h2>
-        
-        <?php if ($error): ?>
-            <div class="error-message"><?= htmlspecialchars($error) ?></div>
+        <h2><i class="fas fa-sign-in-alt"></i> Sign In</h2>
+        <?php if (!empty($error)): ?>
+            <div class="message error-message">
+                <i class="fas fa-exclamation-circle"></i>
+                <?php echo htmlspecialchars($error); ?>
+            </div>
         <?php endif; ?>
-
         <form method="POST">
             <div class="form-group">
                 <label for="username">Username</label>
                 <div class="input-group">
                     <i class="fas fa-user input-icon"></i>
-                    <input type="text" id="username" name="username" placeholder="Enter your username" required>
+                    <input type="text" id="username" name="username" 
+                           placeholder="Enter your username" 
+                           value="<?php echo htmlspecialchars($username); ?>" required>
                 </div>
             </div>
-            
             <div class="form-group">
                 <label for="password">Password</label>
                 <div class="input-group">
                     <i class="fas fa-lock input-icon"></i>
-                    <input type="password" id="password" name="password" placeholder="Enter your password" required>
+                    <input type="password" id="password" name="password" 
+                           placeholder="Enter your password" required>
                 </div>
             </div>
-            
-            <div class="login-options">
-                <div class="remember-me">
-                    <input type="checkbox" id="remember" name="remember">
-                    <label for="remember" style="display: inline; margin-bottom: 0;">Remember me</label>
-                </div>
-                <a href="forgot-password.php" class="forgot-password">Forgot password?</a>
-            </div>
-            
-            <button type="submit"><i class="fas fa-sign-in-alt"></i> Login</button>
+            <button type="submit" class="btn">
+                <i class="fas fa-sign-in-alt"></i> Sign In
+            </button>
         </form>
-        
-        <div class="divider">
-            <span>OR</span>
-        </div>
-        
-        <a href="scan.php" class="alt-login-btn">
-            <i class="fas fa-camera"></i> Login with Facial Recognition
-        </a>
-        
         <div class="form-footer">
             <p>Don't have an account? <a href="register.php">Register</a></p>
+            <p><a href="forgot-password.php">Forgot Password?</a></p>
         </div>
     </div>
 </div>
-
 <script>
     // Focus the username field on page load
     document.addEventListener('DOMContentLoaded', function() {
