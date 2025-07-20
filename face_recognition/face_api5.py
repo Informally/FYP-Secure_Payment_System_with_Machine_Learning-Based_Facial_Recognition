@@ -134,6 +134,14 @@ def connect_db():
 # Preprocessing: Standardize image for FaceNet
 def preprocess_face(face_pixels):
     face_pixels = face_pixels.astype('float32')
+        # ADD THIS: Simple lighting normalization
+    lab = cv2.cvtColor(face_pixels.astype(np.uint8), cv2.COLOR_BGR2LAB)
+    l_channel = lab[:, :, 0]
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l_channel = clahe.apply(l_channel)
+    lab[:, :, 0] = l_channel
+    face_pixels = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR).astype('float32')
+
     mean, std = face_pixels.mean(), face_pixels.std()
     logger.debug(f"Preprocessing - Mean: {mean:.2f}, Std: {std:.2f}")
     face_pixels = cv2.cvtColor(face_pixels, cv2.COLOR_BGR2RGB)
@@ -1274,11 +1282,11 @@ def hybrid_recognition(input_embedding, user_claim=None):
         logger.info(f"Using direct comparison mode for {'user claim: '+user_claim if user_claim else 'small user base'}")
         if user_claim:
             cursor.execute("SELECT embedding FROM face_embeddings WHERE user_id = %s", (user_claim,))
-            cosine_threshold = 0.40  # LOWERED from 0.55 for better matching
+            cosine_threshold = 0.45  # LOWERED from 0.55 for better matching
             required_matches = 2     # LOWERED from 3 for easier verification
         else:
             cursor.execute("SELECT user_id, embedding FROM face_embeddings")
-            cosine_threshold = 0.40  # LOWERED from 0.55
+            cosine_threshold = 0.45  # LOWERED from 0.55
             required_matches = 3     # LOWERED from 5
         embeddings = cursor.fetchall()
         cursor.close()

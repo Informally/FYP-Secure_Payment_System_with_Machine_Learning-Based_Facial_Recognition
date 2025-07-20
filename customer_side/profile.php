@@ -41,15 +41,14 @@ try {
     
     $user_db_id = $user['id'];
     
-    // Check if face is registered - Using your existing face_embeddings table
+    // Check if face is registered
     $face_registered = false;
     $face_data = null;
     
     $check_table = $conn->query("SHOW TABLES LIKE 'face_embeddings'");
     if ($check_table->num_rows > 0) {
-        // Your face_embeddings table uses the full user_id string format
         $stmt = $conn->prepare("SELECT * FROM face_embeddings WHERE user_id = ?");
-        $stmt->bind_param("s", $user['user_id']); // Use the user_id column from users table
+        $stmt->bind_param("s", $user['user_id']);
         $stmt->execute();
         $result = $stmt->get_result();
         $face_data = $result->fetch_assoc();
@@ -97,47 +96,6 @@ try {
                     }
                     break;
                     
-                case 'request_email_change':
-                    $new_email = SecurityUtils::sanitizeInput($_POST['email'] ?? '');
-                    
-                    if (empty($new_email)) {
-                        $error = "Email address is required.";
-                    } elseif (!filter_var($new_email, FILTER_VALIDATE_EMAIL)) {
-                        $error = "Please enter a valid email address.";
-                    } elseif ($new_email === $user['email']) {
-                        $error = "No changes detected.";
-                    } else {
-                        // Check if email is already taken
-                        $stmt = $conn->prepare("SELECT id FROM users WHERE email = ? AND id != ?");
-                        $stmt->bind_param("si", $new_email, $user_db_id);
-                        $stmt->execute();
-                        $result = $stmt->get_result();
-                        
-                        if ($result->fetch_assoc()) {
-                            $error = "Email is already registered to another account.";
-                        } else {
-                            // Generate verification token for new email
-                            $verification_token = bin2hex(random_bytes(32));
-                            $expires_at = date('Y-m-d H:i:s', strtotime('+24 hours'));
-                            
-                            // Store pending email change in session
-                            $_SESSION['pending_email_change'] = [
-                                'new_email' => $new_email,
-                                'token' => $verification_token,
-                                'expires' => time() + (24 * 3600) // 24 hours
-                            ];
-                            
-                            // Send verification email to NEW email address
-                            if (sendEmailVerification($new_email, $user['full_name'], $verification_token)) {
-                                $success = "Verification email sent to " . htmlspecialchars($new_email) . "! Please check your new email and click the verification link to confirm the change.";
-                            } else {
-                                $error = "Failed to send verification email. Please try again.";
-                            }
-                        }
-                        $stmt->close();
-                    }
-                    break;
-                    
                 case 'change_password':
                     $current_password = PasswordDeobfuscator::getPassword('current_password');
                     $new_password = PasswordDeobfuscator::getPassword('new_password');
@@ -174,7 +132,7 @@ try {
                     
                 case 'change_pin':
                     $current_pin = PasswordDeobfuscator::getPassword('current_pin');
-                    $new_pin_array = PasswordDeobfuscator::getPin(); // For new_pin[] arrays
+                    $new_pin_array = PasswordDeobfuscator::getPin();
                     $new_pin = implode('', $new_pin_array);
                     
                     if (empty($current_pin) || empty($new_pin)) {
@@ -226,9 +184,6 @@ try {
             }
         }
     }
-    
-    // Check for pending email change
-    $pending_email = isset($_SESSION['pending_email_change']) && $_SESSION['pending_email_change']['expires'] > time();
     
     $conn->close();
     
@@ -387,23 +342,6 @@ $csrf_token = generateCSRFToken();
         .face-not-registered {
             background: rgba(237, 137, 54, 0.1);
             color: var(--warning);
-        }
-        
-        /* Pending Alert */
-        .pending-alert {
-            background: linear-gradient(135deg, #3182ce, #4299e1);
-            color: white;
-            padding: 15px 20px;
-            border-radius: 10px;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-size: 14px;
-        }
-        
-        .pending-alert i {
-            font-size: 16px;
         }
         
         /* Tabs */
@@ -775,14 +713,6 @@ $csrf_token = generateCSRFToken();
             </div>
         </div>
 
-        <!-- Pending Email Change Alert -->
-        <?php if ($pending_email): ?>
-            <div class="pending-alert">
-                <i class="fas fa-clock"></i>
-                <div>Email change pending verification. Check your new email (<?= htmlspecialchars($_SESSION['pending_email_change']['new_email']) ?>) for the verification link.</div>
-            </div>
-        <?php endif; ?>
-
         <!-- Messages -->
         <?php if ($error): ?>
             <div class="message error-message">
@@ -855,50 +785,26 @@ $csrf_token = generateCSRFToken();
                         </form>
                     </div>
 
-                    <!-- Email Change Section -->
+                    <!-- Email Section -->
                     <div class="form-section">
                         <h2 class="section-title">
                             <i class="fas fa-envelope"></i>
                             Email Address Management
                         </h2>
                         
-                        <form method="POST" id="emailForm">
-                            <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
-                            <input type="hidden" name="action" value="request_email_change">
-                            
-                            <div class="form-group">
-                                <label for="current_email">Current Email</label>
-                                <div class="input-group">
-                                    <input type="email" id="current_email" value="<?= htmlspecialchars($user['email']) ?>" disabled>
-                                    <i class="fas fa-envelope input-icon"></i>
-                                </div>
+                        <div class="form-group">
+                            <label for="current_email">Current Email</label>
+                            <div class="input-group">
+                                <input type="email" id="current_email" value="<?= htmlspecialchars($user['email']) ?>" disabled>
+                                <i class="fas fa-envelope input-icon"></i>
                             </div>
-                            
-                            <div class="form-group">
-                                <label for="email">New Email Address</label>
-                                <div class="input-group">
-                                    <input type="email" id="email" name="email" 
-                                           placeholder="Enter new email address" required
-                                           <?= $pending_email ? 'disabled' : '' ?>>
-                                    <i class="fas fa-envelope input-icon"></i>
-                                </div>
-                            </div>
+                            <small style="color: var(--text-light); font-size: 12px;">Email Address cannot be changed</small>
+                        </div>
 
-                            <div class="security-notice">
-                                <i class="fas fa-shield-alt"></i>
-                                A verification email will be sent to your new email address
-                            </div>
-                            
-                            <?php if (!$pending_email): ?>
-                                <br><button type="submit" class="btn btn-primary">
-                                    <i class="fas fa-paper-plane"></i> Send Verification Email
-                                </button>
-                            <?php else: ?>
-                                <button type="button" class="btn btn-secondary" disabled>
-                                    <i class="fas fa-clock"></i> Verification Email Sent
-                                </button>
-                            <?php endif; ?>
-                        </form>
+                        <div class="security-notice">
+                            <i class="fas fa-shield-alt"></i>
+                            Email Address cannot be changed for security reasons
+                        </div>
                     </div>
                 </div>
 
