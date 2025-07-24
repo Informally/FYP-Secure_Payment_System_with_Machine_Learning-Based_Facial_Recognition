@@ -55,7 +55,7 @@ if (!empty($token)) {
                 // $_SESSION['authenticatedUserId'] = $user['username'];
                 // $_SESSION['just_verified'] = true;
                 
-                $message = "✅ Your email has been verified! Welcome bonus of RM 50.00 added to your wallet. Redirecting to dashboard...";
+                $message = "✅ Your email has been verified! Welcome bonus of RM 50.00 added to your wallet. Please click on the Login button below to continue.";
                 $redirect = false;
                 
             } else {
