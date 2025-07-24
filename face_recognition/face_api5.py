@@ -580,7 +580,7 @@ def detect_blinks(frame_sequence, threshold=EAR_THRESHOLD, consecutive_frames=CO
             
             # Validation criteria (more lenient)
             min_depth_required = max(0.02, ear_std * 0.5)  # At least 0.02 or half std dev
-            min_duration = 1  # At least 1 frame
+            min_duration = 2  # At least 2 frame
             max_duration = 8  # At most 8 frames (reasonable blink duration)
             
             is_valid = (blink_depth >= min_depth_required and 

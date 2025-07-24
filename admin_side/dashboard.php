@@ -14,8 +14,7 @@ $summary_query = "
         (SELECT COUNT(*) FROM users WHERE account_status = 'active') as total_users,
         (SELECT COUNT(*) FROM merchants WHERE is_active = 1) as active_merchants,
         (SELECT COUNT(*) FROM transactions WHERE DATE(timestamp) = CURDATE()) as today_transactions,
-        (SELECT COALESCE(SUM(ABS(amount)), 0) FROM transactions WHERE DATE(timestamp) = CURDATE() AND status = 'success' AND transaction_type = 'payment') as today_revenue,
-        (SELECT COUNT(*) FROM system_alerts WHERE is_resolved = FALSE) as unresolved_alerts
+        (SELECT COALESCE(SUM(ABS(amount)), 0) FROM transactions WHERE DATE(timestamp) = CURDATE() AND status = 'success' AND transaction_type = 'payment') as today_revenue
 ";
 $summary = $conn->query($summary_query)->fetch_assoc();
 
@@ -31,16 +30,6 @@ $stmt = $conn->prepare("
 ");
 $stmt->execute();
 $recent_transactions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-// Get active alerts (system notifications)
-$stmt = $conn->prepare("
-    SELECT * FROM system_alerts 
-    WHERE is_resolved = FALSE 
-    ORDER BY severity DESC, created_at DESC 
-    LIMIT 5
-");
-$stmt->execute();
-$alerts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
 // Get merchant performance data
 $stmt = $conn->prepare("
