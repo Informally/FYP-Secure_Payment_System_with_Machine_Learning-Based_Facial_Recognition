@@ -53,6 +53,7 @@ The API will run on `http://localhost:5000`
 
 ### Admin Access
 <img width="2560" height="1282" alt="image" src="https://github.com/user-attachments/assets/d54f3c71-36ea-4ce8-ac65-ed1d6b08a588" />
+
 - **URL**: `http://localhost/FYP/admin_side/login.php`
 - **Username**: `admin`
 - **Password**: `Admin123!`
@@ -65,6 +66,7 @@ The API will run on `http://localhost:5000`
 
 ### Customer Access
 <img width="2560" height="1282" alt="image" src="https://github.com/user-attachments/assets/71f0bc3b-f7aa-4aad-8274-5f8eec4fd478" />
+
 - **URL**: `http://localhost/FYP/customer_side/login.php`
 - Register a new account or login with existing credentials
 - Option to login with facial recognition (after face registration)
@@ -77,6 +79,7 @@ The API will run on `http://localhost:5000`
 
 ### Merchant Demo
 <img width="2538" height="1305" alt="image" src="https://github.com/user-attachments/assets/a9b0573c-f118-4de1-84cf-12ab221fa384" />
+
 - **URL**: `http://localhost/FYP/business_integration/e-commerce.php`
 - Demonstrates how businesses can integrate the payment system
 - Shows the complete customer journey from product selection to payment
